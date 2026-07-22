@@ -117,6 +117,20 @@ const selectionsEqual = (left: unknown, right: unknown): boolean => {
   );
 };
 
+type Reconciliation<Value> = { value: Value };
+
+const takeSuperseded = <Value,>(
+  reconciliations: Reconciliation<Value>[],
+  confirmed: Value
+): boolean => {
+  const index = reconciliations.findIndex(({ value }) =>
+    Object.is(value, confirmed)
+  );
+  if (index === -1) return false;
+  reconciliations.splice(index, 1);
+  return true;
+};
+
 export const usePlayerState = <Selected,>(
   selector: (state: PlayerState) => Selected
 ): Selected => {
@@ -217,9 +231,14 @@ export const Root = ({
   const volumeChangeCallback = useRef(onVolumeChange);
   const playbackRateChangeCallback = useRef(onPlaybackRateChange);
   const autoplayConfiguration = useRef({ autoplay, muted });
-  const pendingMuted = useRef<{ value: boolean } | undefined>(undefined);
-  const pendingVolume = useRef<{ value: number } | undefined>(undefined);
-  const pendingPlaybackRate = useRef<{ value: number } | undefined>(undefined);
+  const pendingMuted = useRef<Reconciliation<boolean> | undefined>(undefined);
+  const pendingVolume = useRef<Reconciliation<number> | undefined>(undefined);
+  const pendingPlaybackRate = useRef<Reconciliation<number> | undefined>(
+    undefined
+  );
+  const supersededMuted = useRef<Reconciliation<boolean>[]>([]);
+  const supersededVolume = useRef<Reconciliation<number>[]>([]);
+  const supersededPlaybackRate = useRef<Reconciliation<number>[]>([]);
   const preferenceUnsubscribe = useRef<(() => void) | undefined>(undefined);
   const detectedSource = useMemo(() => detectSource(source), [source]);
 
@@ -243,6 +262,9 @@ export const Root = ({
       void (value ? controller.mute() : controller.unmute()).then((result) => {
         if (!result.ok && pendingMuted.current === pending) {
           pendingMuted.current = undefined;
+        } else if (!result.ok) {
+          const index = supersededMuted.current.indexOf(pending);
+          if (index !== -1) supersededMuted.current.splice(index, 1);
         }
       });
     },
@@ -257,6 +279,9 @@ export const Root = ({
       void controller.setVolume(value).then((result) => {
         if (!result.ok && pendingVolume.current === pending) {
           pendingVolume.current = undefined;
+        } else if (!result.ok) {
+          const index = supersededVolume.current.indexOf(pending);
+          if (index !== -1) supersededVolume.current.splice(index, 1);
         }
       });
     },
@@ -271,6 +296,9 @@ export const Root = ({
       void controller.setPlaybackRate(value).then((result) => {
         if (!result.ok && pendingPlaybackRate.current === pending) {
           pendingPlaybackRate.current = undefined;
+        } else if (!result.ok) {
+          const index = supersededPlaybackRate.current.indexOf(pending);
+          if (index !== -1) supersededPlaybackRate.current.splice(index, 1);
         }
       });
     },
@@ -284,48 +312,49 @@ export const Root = ({
       const confirmedVolume = event.detail.volume;
       const mutedRestoration = pendingMuted.current;
       const volumeRestoration = pendingVolume.current;
+      const mutedPropDriven =
+        mutedRestoration?.value === confirmedMuted ||
+        takeSuperseded(supersededMuted.current, confirmedMuted);
+      const volumePropDriven =
+        Object.is(volumeRestoration?.value, confirmedVolume) ||
+        takeSuperseded(supersededVolume.current, confirmedVolume);
 
       pendingMuted.current = undefined;
       pendingVolume.current = undefined;
-      if (mutedRestoration?.value === confirmedMuted) {
+      if (lastConfirmedMuted.current !== confirmedMuted) {
         lastConfirmedMuted.current = confirmedMuted;
-      } else {
-        if (lastConfirmedMuted.current !== confirmedMuted) {
-          lastConfirmedMuted.current = confirmedMuted;
+        if (!mutedPropDriven) {
           mutedChangeCallback.current?.(confirmedMuted);
         }
-        if (controlledMuted.current === undefined) {
-          desiredMuted.current = confirmedMuted;
-        } else if (controlledMuted.current !== confirmedMuted) {
-          reconcileMuted(controlledMuted.current);
-        }
       }
-      if (Object.is(volumeRestoration?.value, confirmedVolume)) {
+      if (controlledMuted.current === undefined) {
+        desiredMuted.current = confirmedMuted;
+      } else if (controlledMuted.current !== confirmedMuted) {
+        reconcileMuted(controlledMuted.current);
+      }
+      if (!Object.is(lastConfirmedVolume.current, confirmedVolume)) {
         lastConfirmedVolume.current = confirmedVolume;
-      } else {
-        if (!Object.is(lastConfirmedVolume.current, confirmedVolume)) {
-          lastConfirmedVolume.current = confirmedVolume;
+        if (!volumePropDriven) {
           volumeChangeCallback.current?.(confirmedVolume);
         }
-        if (controlledVolume.current === undefined) {
-          desiredVolume.current = confirmedVolume;
-        } else if (!Object.is(controlledVolume.current, confirmedVolume)) {
-          reconcileVolume(controlledVolume.current);
-        }
+      }
+      if (controlledVolume.current === undefined) {
+        desiredVolume.current = confirmedVolume;
+      } else if (!Object.is(controlledVolume.current, confirmedVolume)) {
+        reconcileVolume(controlledVolume.current);
       }
     });
     const unsubscribeRate = controller.on('ratechange', (event) => {
       const confirmed = event.detail.playbackRate;
       const restoration = pendingPlaybackRate.current;
+      const propDriven =
+        Object.is(restoration?.value, confirmed) ||
+        takeSuperseded(supersededPlaybackRate.current, confirmed);
 
       pendingPlaybackRate.current = undefined;
-      if (Object.is(restoration?.value, confirmed)) {
-        lastConfirmedPlaybackRate.current = confirmed;
-        return;
-      }
       if (!Object.is(lastConfirmedPlaybackRate.current, confirmed)) {
         lastConfirmedPlaybackRate.current = confirmed;
-        playbackRateChangeCallback.current?.(confirmed);
+        if (!propDriven) playbackRateChangeCallback.current?.(confirmed);
       }
       if (controlledPlaybackRate.current === undefined) {
         desiredPlaybackRate.current = confirmed;
@@ -354,6 +383,9 @@ export const Root = ({
       pendingMuted.current = undefined;
       pendingVolume.current = undefined;
       pendingPlaybackRate.current = undefined;
+      supersededMuted.current.length = 0;
+      supersededVolume.current.length = 0;
+      supersededPlaybackRate.current.length = 0;
       if (media) {
         media.muted = controlledMuted.current ?? desiredMuted.current;
         media.volume = controlledVolume.current ?? desiredVolume.current;
@@ -380,45 +412,66 @@ export const Root = ({
   useEffect(() => {
     if (muted === undefined) {
       pendingMuted.current = undefined;
+      supersededMuted.current.length = 0;
       if (wasMutedControlled.current) {
         desiredMuted.current = controller.getState().muted;
       }
       wasMutedControlled.current = false;
-    } else if (controller.getState().muted !== muted) {
-      wasMutedControlled.current = true;
+      return;
+    }
+    wasMutedControlled.current = true;
+    if (pendingMuted.current && pendingMuted.current.value !== muted) {
+      supersededMuted.current.push(pendingMuted.current);
+      pendingMuted.current = undefined;
+    }
+    if (controller.getState().muted !== muted) {
       reconcileMuted(muted);
-    } else {
-      wasMutedControlled.current = true;
     }
   }, [controller, muted, reconcileMuted]);
 
   useEffect(() => {
     if (volume === undefined) {
       pendingVolume.current = undefined;
+      supersededVolume.current.length = 0;
       if (wasVolumeControlled.current) {
         desiredVolume.current = controller.getState().volume;
       }
       wasVolumeControlled.current = false;
-    } else if (!Object.is(controller.getState().volume, volume)) {
-      wasVolumeControlled.current = true;
+      return;
+    }
+    wasVolumeControlled.current = true;
+    if (
+      pendingVolume.current &&
+      !Object.is(pendingVolume.current.value, volume)
+    ) {
+      supersededVolume.current.push(pendingVolume.current);
+      pendingVolume.current = undefined;
+    }
+    if (!Object.is(controller.getState().volume, volume)) {
       reconcileVolume(volume);
-    } else {
-      wasVolumeControlled.current = true;
     }
   }, [controller, reconcileVolume, volume]);
 
   useEffect(() => {
     if (playbackRate === undefined) {
       pendingPlaybackRate.current = undefined;
+      supersededPlaybackRate.current.length = 0;
       if (wasPlaybackRateControlled.current) {
         desiredPlaybackRate.current = controller.getState().playbackRate;
       }
       wasPlaybackRateControlled.current = false;
-    } else if (!Object.is(controller.getState().playbackRate, playbackRate)) {
-      wasPlaybackRateControlled.current = true;
+      return;
+    }
+    wasPlaybackRateControlled.current = true;
+    if (
+      pendingPlaybackRate.current &&
+      !Object.is(pendingPlaybackRate.current.value, playbackRate)
+    ) {
+      supersededPlaybackRate.current.push(pendingPlaybackRate.current);
+      pendingPlaybackRate.current = undefined;
+    }
+    if (!Object.is(controller.getState().playbackRate, playbackRate)) {
       reconcilePlaybackRate(playbackRate);
-    } else {
-      wasPlaybackRateControlled.current = true;
     }
   }, [controller, playbackRate, reconcilePlaybackRate]);
 

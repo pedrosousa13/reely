@@ -149,6 +149,107 @@ test('reconciles controlled preferences without reporting prop-driven confirmati
   expect(onPlaybackRateChange).not.toHaveBeenCalled();
 });
 
+test('supersedes a delayed muted confirmation after a rapid controlled reversal', () => {
+  const onMutedChange = vi.fn();
+  const handle = createRef<Player.PlayerHandle>();
+  const player = (muted: boolean) => (
+    <Player.Root
+      muted={muted}
+      onMutedChange={onMutedChange}
+      ref={handle}
+      source="/tracer.mp4"
+    >
+      <Player.Media />
+    </Player.Root>
+  );
+  const { rerender } = render(player(false));
+  const media = screen.getByLabelText<HTMLVideoElement>('Reely media');
+  const mute = vi.spyOn(handle.current!, 'mute');
+  const unmute = vi.spyOn(handle.current!, 'unmute');
+
+  rerender(player(true));
+  rerender(player(false));
+  expect(media.muted).toBe(true);
+
+  fireEvent.volumeChange(media);
+  expect(handle.current?.getState().muted).toBe(true);
+  expect(media.muted).toBe(false);
+  fireEvent.volumeChange(media);
+  fireEvent.volumeChange(media);
+
+  expect(handle.current?.getState().muted).toBe(false);
+  expect(media.muted).toBe(false);
+  expect(onMutedChange).not.toHaveBeenCalled();
+  expect(mute).toHaveBeenCalledTimes(1);
+  expect(unmute).toHaveBeenCalledTimes(1);
+});
+
+test('supersedes a delayed volume confirmation after a rapid controlled reversal', () => {
+  const onVolumeChange = vi.fn();
+  const handle = createRef<Player.PlayerHandle>();
+  const player = (volume: number) => (
+    <Player.Root
+      onVolumeChange={onVolumeChange}
+      ref={handle}
+      source="/tracer.mp4"
+      volume={volume}
+    >
+      <Player.Media />
+    </Player.Root>
+  );
+  const { rerender } = render(player(0.7));
+  const media = screen.getByLabelText<HTMLVideoElement>('Reely media');
+  const setVolume = vi.spyOn(handle.current!, 'setVolume');
+
+  rerender(player(0.2));
+  rerender(player(0.7));
+  expect(media.volume).toBe(0.2);
+
+  fireEvent.volumeChange(media);
+  expect(handle.current?.getState().volume).toBe(0.2);
+  expect(media.volume).toBe(0.7);
+  fireEvent.volumeChange(media);
+  fireEvent.volumeChange(media);
+
+  expect(handle.current?.getState().volume).toBe(0.7);
+  expect(media.volume).toBe(0.7);
+  expect(onVolumeChange).not.toHaveBeenCalled();
+  expect(setVolume.mock.calls).toEqual([[0.2], [0.7]]);
+});
+
+test('supersedes a delayed rate confirmation after a rapid controlled reversal', () => {
+  const onPlaybackRateChange = vi.fn();
+  const handle = createRef<Player.PlayerHandle>();
+  const player = (playbackRate: number) => (
+    <Player.Root
+      onPlaybackRateChange={onPlaybackRateChange}
+      playbackRate={playbackRate}
+      ref={handle}
+      source="/tracer.mp4"
+    >
+      <Player.Media />
+    </Player.Root>
+  );
+  const { rerender } = render(player(1.25));
+  const media = screen.getByLabelText<HTMLVideoElement>('Reely media');
+  const setPlaybackRate = vi.spyOn(handle.current!, 'setPlaybackRate');
+
+  rerender(player(2));
+  rerender(player(1.25));
+  expect(media.playbackRate).toBe(2);
+
+  fireEvent.rateChange(media);
+  expect(handle.current?.getState().playbackRate).toBe(2);
+  expect(media.playbackRate).toBe(1.25);
+  fireEvent.rateChange(media);
+  fireEvent.rateChange(media);
+
+  expect(handle.current?.getState().playbackRate).toBe(1.25);
+  expect(media.playbackRate).toBe(1.25);
+  expect(onPlaybackRateChange).not.toHaveBeenCalled();
+  expect(setPlaybackRate.mock.calls).toEqual([[2], [1.25]]);
+});
+
 test('reports confirmed controlled conflicts before restoring controlled values', () => {
   const mediaAtMutedCallback: boolean[] = [];
   const mediaAtVolumeCallback: number[] = [];
