@@ -155,7 +155,16 @@ test.each([
   { type: 'hls', src: '', engine: 'native' },
   { type: 'hls', src: '/master.m3u8', engine: 'other' },
   { type: 'youtube', videoId: '' },
-  { type: 'vimeo', videoId: '123', hash: '' }
+  { type: 'youtube', videoId: 'with space' },
+  { type: 'youtube', videoId: ' abc123 ' },
+  { type: 'youtube', videoId: '   ' },
+  { type: 'vimeo', videoId: 'not-numeric' },
+  { type: 'vimeo', videoId: ' 123 ' },
+  { type: 'vimeo', videoId: '   ' },
+  { type: 'vimeo', videoId: '123', hash: '' },
+  { type: 'vimeo', videoId: '123', hash: '../x' },
+  { type: 'vimeo', videoId: '123', hash: ' privatehash ' },
+  { type: 'vimeo', videoId: '123', hash: '   ' }
 ])('rejects invalid explicit source objects: %o', (input) => {
   const result = detectSource(input);
   expect(result).toMatchObject({
@@ -167,6 +176,17 @@ test.each([
     expect(result.guidance).toMatch(/explicit source object/i);
   }
 });
+
+test.each(['https://youtube.com/embed/id.mp4', 'https://vimeo.com/123.mp4'])(
+  'does not detect malformed known-provider URLs as files: %s',
+  (input) => {
+    expect(detectSource(input)).toMatchObject({
+      status: 'failure',
+      input,
+      reason: 'malformed-string'
+    });
+  }
+);
 
 test.each([
   'https://player.vimeo.com/video/not-a-number',

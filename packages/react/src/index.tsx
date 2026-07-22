@@ -86,8 +86,11 @@ export const Media = () => {
       playsInline
       preload="metadata"
       ref={registerMedia}
-      src={source.source.sources[0]?.src}
-    />
+    >
+      {source.source.sources.map(({ mimeType, src }, index) => (
+        <source key={`${src}:${mimeType}:${index}`} src={src} type={mimeType} />
+      ))}
+    </video>
   );
 };
 

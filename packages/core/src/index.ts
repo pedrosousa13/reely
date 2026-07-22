@@ -73,6 +73,9 @@ const isNonEmptyString = (value: unknown): value is string =>
 const isYouTubeVideoId = (value: unknown): value is string =>
   isNonEmptyString(value) && /^[A-Za-z0-9_-]+$/.test(value);
 
+const isVimeoVideoId = (value: unknown): value is string =>
+  isNonEmptyString(value) && /^\d+$/.test(value);
+
 const isVimeoHash = (value: unknown): value is string =>
   isNonEmptyString(value) && /^[A-Za-z0-9]+$/.test(value);
 
@@ -147,7 +150,7 @@ const sourceFromVimeoUrl = (url: URL): VimeoSource | undefined => {
   const queryHashes = url.searchParams.getAll('h');
   const queryHash = queryHashes.length === 1 ? queryHashes[0] : undefined;
 
-  if (!videoId || !/^\d+$/.test(videoId)) return undefined;
+  if (!isVimeoVideoId(videoId)) return undefined;
   if (
     queryHashes.length > 1 ||
     (queryHashes.length === 1 && !isVimeoHash(queryHash))
@@ -193,15 +196,14 @@ const sourceFromExplicitObject = (
   }
 
   if (input.type === 'youtube') {
-    return isNonEmptyString(input.videoId)
+    return isYouTubeVideoId(input.videoId)
       ? (input as YouTubeSource)
       : undefined;
   }
 
   if (input.type === 'vimeo') {
-    if (!isNonEmptyString(input.videoId)) return undefined;
-    if (input.hash !== undefined && !isNonEmptyString(input.hash))
-      return undefined;
+    if (!isVimeoVideoId(input.videoId)) return undefined;
+    if (input.hash !== undefined && !isVimeoHash(input.hash)) return undefined;
     return input as VimeoSource;
   }
 
@@ -234,19 +236,23 @@ export const detectSource = (input: unknown): SourceDetectionResult => {
       }
     }
 
-    const fileSource = sourceFromFileExtension(input);
-    if (fileSource) return { status: 'success', input, source: fileSource };
-
     if (url) {
-      const youtubeSource = sourceFromYouTubeUrl(url);
-      if (youtubeSource)
-        return { status: 'success', input, source: youtubeSource };
-      const vimeoSource = sourceFromVimeoUrl(url);
-      if (vimeoSource) return { status: 'success', input, source: vimeoSource };
-      if (isYouTubeHost(url.hostname) || isVimeoHost(url.hostname)) {
-        return failure(input, 'malformed-string');
+      if (isYouTubeHost(url.hostname)) {
+        const source = sourceFromYouTubeUrl(url);
+        return source
+          ? { status: 'success', input, source }
+          : failure(input, 'malformed-string');
+      }
+      if (isVimeoHost(url.hostname)) {
+        const source = sourceFromVimeoUrl(url);
+        return source
+          ? { status: 'success', input, source }
+          : failure(input, 'malformed-string');
       }
     }
+
+    const fileSource = sourceFromFileExtension(input);
+    if (fileSource) return { status: 'success', input, source: fileSource };
 
     return failure(input, 'unsupported-string');
   }
@@ -266,9 +272,11 @@ export class PlayerController {
   #state: PlaybackState = 'paused';
 
   setProvider = (provider: MediaProvider | undefined): void => {
+    if (provider === this.#provider) return;
     this.#unsubscribe?.();
     this.#provider?.destroy();
     this.#provider = provider;
+    this.#setState('paused');
     this.#unsubscribe = provider?.subscribe(this.#setState);
   };
 
