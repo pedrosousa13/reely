@@ -1,11 +1,19 @@
 import { createRoot } from 'react-dom/client';
 import * as Player from '@reely/react';
 
+const autoplayParameter = new URLSearchParams(window.location.search).get(
+  'autoplay'
+);
+const autoplay: Player.RootProps['autoplay'] =
+  autoplayParameter === 'muted' || autoplayParameter === 'audible'
+    ? autoplayParameter
+    : false;
+
 const App = () => (
   <>
     <h1>Reely</h1>
     <p>A minimal player with explicit, inspectable media source detection.</p>
-    <Player.Root source="/tracer.mp4">
+    <Player.Root autoplay={autoplay} source="/tracer.mp4">
       <Player.Viewport>
         <Player.Media />
       </Player.Viewport>
@@ -41,6 +49,53 @@ await seekTo(30) // { ok: true } or { ok: false, reason, error? }`}</pre>
     <pre>{`<Player.Root source="/video.mp4" startTime={10} endTime={30} loop>
   <Player.Media />
 </Player.Root>`}</pre>
+    <h2>Playback preferences</h2>
+    <p>
+      Muting, volume, and playback rate support standard uncontrolled defaults
+      or controlled values. Defaults seed the preference once for a Root and
+      survive media replacement; changing a default prop later does not reset
+      it. Change callbacks report values only after the provider confirms them.
+    </p>
+    <pre>{`// Uncontrolled preferences
+<Player.Root
+  source="/video.mp4"
+  defaultMuted
+  defaultVolume={0.4}
+  defaultPlaybackRate={1.5}
+>...</Player.Root>
+
+// Controlled preferences
+<Player.Root
+  source="/video.mp4"
+  muted={muted}
+  volume={volume}
+  playbackRate={playbackRate}
+  onMutedChange={setMuted}
+  onVolumeChange={setVolume}
+  onPlaybackRateChange={setPlaybackRate}
+>...</Player.Root>`}</pre>
+    <p>
+      There is deliberately no <code>playing</code> prop: playback is confirmed
+      provider state, so use player actions to request play or pause and read
+      the result with <code>usePlayerState</code>.
+    </p>
+    <h2>Autoplay</h2>
+    <p>
+      Set <code>autoplay</code> to <code>false</code> (the default),{' '}
+      <code>muted</code>, or <code>audible</code>. Its observable outcome moves
+      through <code>attempting</code> and then <code>started</code>,{' '}
+      <code>blocked</code>, or <code>failed</code>. The Play button exposes that
+      result through <code>data-autoplay-state</code> and remains available
+      after a blocked attempt.
+    </p>
+    <pre>{`<Player.Root source="/video.mp4" autoplay="muted">...</Player.Root>
+<Player.Root source="/video.mp4" autoplay="audible">...</Player.Root>`}</pre>
+    <p>
+      Audible autoplay never silently retries as muted. Muted autoplay also
+      cannot be combined with controlled <code>muted={'{false}'}</code>; that
+      conflict produces a recoverable configuration error instead of changing
+      the controlled value.
+    </p>
     <p>
       All commands return a promise of <code>CommandResult</code>:{' '}
       <code>play</code>, <code>pause</code>, <code>togglePlayback</code>, seek,

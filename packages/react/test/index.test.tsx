@@ -1,8 +1,14 @@
 // @vitest-environment happy-dom
 
 import * as process from 'node:process';
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
-import { createRef } from 'react';
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor
+} from '@testing-library/react';
+import { createRef, StrictMode } from 'react';
 import { afterEach, expect, test, vi } from 'vitest';
 import * as Player from '../src/index';
 
@@ -21,6 +27,673 @@ const verifyReadonlyStateTypes = (
   // @ts-expect-error Nested time ranges are readonly.
   state.buffered[0]!.end = 10;
 };
+
+const confirmMetadataReady = (media: HTMLVideoElement): void => {
+  Object.defineProperty(HTMLMediaElement, 'HAVE_METADATA', {
+    configurable: true,
+    value: 1
+  });
+  Object.defineProperty(media, 'readyState', {
+    configurable: true,
+    value: 1
+  });
+  fireEvent.loadedMetadata(media);
+};
+
+test('exposes playback preferences without accepting a playing prop', () => {
+  const onMutedChange = vi.fn();
+  const onVolumeChange = vi.fn();
+  const onPlaybackRateChange = vi.fn();
+  const invalidRoot = (
+    // @ts-expect-error Playback is confirmed state, not a controlled Root prop.
+    <Player.Root playing source="/tracer.mp4">
+      <Player.Media />
+    </Player.Root>
+  );
+
+  render(
+    <Player.Root
+      defaultMuted
+      defaultPlaybackRate={1.5}
+      defaultVolume={0.4}
+      onMutedChange={onMutedChange}
+      onPlaybackRateChange={onPlaybackRateChange}
+      onVolumeChange={onVolumeChange}
+      source="/tracer.mp4"
+    >
+      <Player.Media />
+    </Player.Root>
+  );
+
+  const media = screen.getByLabelText<HTMLVideoElement>('Reely media');
+  expect(media.muted).toBe(true);
+  expect(media.volume).toBe(0.4);
+  expect(media.playbackRate).toBe(1.5);
+  expect(onMutedChange).not.toHaveBeenCalled();
+  expect(onVolumeChange).not.toHaveBeenCalled();
+  expect(onPlaybackRateChange).not.toHaveBeenCalled();
+  expect(invalidRoot).toBeDefined();
+});
+
+test('keeps provider preferences and autoplay active after StrictMode effect replay', async () => {
+  const onVolumeChange = vi.fn();
+  const handle = createRef<Player.PlayerHandle>();
+  vi.spyOn(HTMLMediaElement.prototype, 'play').mockImplementation(function (
+    this: HTMLMediaElement
+  ) {
+    this.dispatchEvent(new Event('play'));
+    return Promise.resolve();
+  });
+  render(
+    <StrictMode>
+      <Player.Root
+        autoplay="audible"
+        onVolumeChange={onVolumeChange}
+        ref={handle}
+        source="/tracer.mp4"
+        volume={0.7}
+      >
+        <Player.Media />
+        <Player.PlayButton />
+      </Player.Root>
+    </StrictMode>
+  );
+  const media = screen.getByLabelText<HTMLVideoElement>('Reely media');
+
+  expect(handle.current?.getState().provider).toBe('native');
+  media.volume = 0.2;
+  fireEvent.volumeChange(media);
+  expect(onVolumeChange).toHaveBeenCalledExactlyOnceWith(0.2);
+  expect(media.volume).toBe(0.7);
+  fireEvent.volumeChange(media);
+
+  confirmMetadataReady(media);
+  await waitFor(() =>
+    expect(screen.getByRole('button').dataset.autoplayState).toBe('started')
+  );
+  expect(onVolumeChange).toHaveBeenCalledTimes(1);
+});
+
+test('does not assign invalid controlled numeric preferences during media registration', () => {
+  const player = (source: string) => (
+    <Player.Root playbackRate={0} source={source} volume={Number.NaN}>
+      <Player.Media />
+    </Player.Root>
+  );
+  const { rerender } = render(player('/first.mp4'));
+  const firstMedia = screen.getByLabelText<HTMLVideoElement>('Reely media');
+
+  expect(firstMedia.volume).toBe(1);
+  expect(firstMedia.playbackRate).toBe(1);
+  rerender(player('/second.mp4'));
+
+  const replacement = screen.getByLabelText<HTMLVideoElement>('Reely media');
+  expect(replacement).not.toBe(firstMedia);
+  expect(replacement.volume).toBe(1);
+  expect(replacement.playbackRate).toBe(1);
+});
+
+test('clamps finite default volume and skips an invalid default rate on replacement', () => {
+  const player = (source: string) => (
+    <Player.Root
+      defaultPlaybackRate={Number.POSITIVE_INFINITY}
+      defaultVolume={-2}
+      source={source}
+    >
+      <Player.Media />
+    </Player.Root>
+  );
+  const { rerender } = render(player('/first.mp4'));
+  const firstMedia = screen.getByLabelText<HTMLVideoElement>('Reely media');
+
+  expect(firstMedia.volume).toBe(0);
+  expect(firstMedia.playbackRate).toBe(1);
+  rerender(player('/second.mp4'));
+
+  const replacement = screen.getByLabelText<HTMLVideoElement>('Reely media');
+  expect(replacement).not.toBe(firstMedia);
+  expect(replacement.volume).toBe(0);
+  expect(replacement.playbackRate).toBe(1);
+});
+
+test.each([
+  ['volume', 0.4],
+  ['playbackRate', 1.5]
+] as const)(
+  'keeps provider lifecycle usable when a valid initial %s setter throws',
+  (property, value) => {
+    const setter = vi
+      .spyOn(HTMLMediaElement.prototype, property, 'set')
+      .mockImplementation(() => {
+        throw new DOMException(`The browser rejected ${property}.`);
+      });
+    const handle = createRef<Player.PlayerHandle>();
+    const preferences =
+      property === 'volume'
+        ? { defaultVolume: value }
+        : { defaultPlaybackRate: value };
+
+    render(
+      <Player.Root ref={handle} source="/tracer.mp4" {...preferences}>
+        <Player.Media />
+      </Player.Root>
+    );
+    const media = screen.getByLabelText<HTMLVideoElement>('Reely media');
+
+    expect(setter).toHaveBeenCalledWith(value);
+    expect(handle.current?.getState().provider).toBe('native');
+    confirmMetadataReady(media);
+    expect(handle.current?.getState().lifecycle).toBe('ready');
+  }
+);
+
+test('seeds default preferences once and retains confirmed values across media replacement', () => {
+  const player = (
+    source: string,
+    defaults: { muted: boolean; volume: number; playbackRate: number }
+  ) => (
+    <Player.Root
+      defaultMuted={defaults.muted}
+      defaultPlaybackRate={defaults.playbackRate}
+      defaultVolume={defaults.volume}
+      source={source}
+    >
+      <Player.Media />
+    </Player.Root>
+  );
+  const { rerender } = render(
+    player('/first.mp4', { muted: true, volume: 0.4, playbackRate: 1.5 })
+  );
+  const firstMedia = screen.getByLabelText<HTMLVideoElement>('Reely media');
+
+  rerender(
+    player('/first.mp4', { muted: false, volume: 0.8, playbackRate: 2 })
+  );
+  expect(firstMedia.muted).toBe(true);
+  expect(firstMedia.volume).toBe(0.4);
+  expect(firstMedia.playbackRate).toBe(1.5);
+
+  firstMedia.muted = false;
+  firstMedia.volume = 0.6;
+  firstMedia.playbackRate = 1.25;
+  fireEvent.volumeChange(firstMedia);
+  fireEvent.rateChange(firstMedia);
+  rerender(
+    player('/second.mp4', { muted: false, volume: 0.8, playbackRate: 2 })
+  );
+
+  const replacement = screen.getByLabelText<HTMLVideoElement>('Reely media');
+  expect(replacement).not.toBe(firstMedia);
+  expect(replacement.muted).toBe(false);
+  expect(replacement.volume).toBe(0.6);
+  expect(replacement.playbackRate).toBe(1.25);
+});
+
+test('reconciles controlled preferences without reporting prop-driven confirmations', () => {
+  const onMutedChange = vi.fn();
+  const onVolumeChange = vi.fn();
+  const onPlaybackRateChange = vi.fn();
+  const player = (muted: boolean, volume: number, playbackRate: number) => (
+    <Player.Root
+      muted={muted}
+      onMutedChange={onMutedChange}
+      onPlaybackRateChange={onPlaybackRateChange}
+      onVolumeChange={onVolumeChange}
+      playbackRate={playbackRate}
+      source="/tracer.mp4"
+      volume={volume}
+    >
+      <Player.Media />
+    </Player.Root>
+  );
+  const { rerender } = render(player(false, 0.7, 1.25));
+  const media = screen.getByLabelText<HTMLVideoElement>('Reely media');
+
+  rerender(player(true, 0.3, 1.75));
+  expect(media.muted).toBe(true);
+  expect(media.volume).toBe(0.3);
+  expect(media.playbackRate).toBe(1.75);
+  fireEvent.volumeChange(media);
+  fireEvent.rateChange(media);
+
+  expect(onMutedChange).not.toHaveBeenCalled();
+  expect(onVolumeChange).not.toHaveBeenCalled();
+  expect(onPlaybackRateChange).not.toHaveBeenCalled();
+});
+
+test('supersedes a delayed muted confirmation after a rapid controlled reversal', () => {
+  const onMutedChange = vi.fn();
+  const handle = createRef<Player.PlayerHandle>();
+  const player = (muted: boolean) => (
+    <Player.Root
+      muted={muted}
+      onMutedChange={onMutedChange}
+      ref={handle}
+      source="/tracer.mp4"
+    >
+      <Player.Media />
+    </Player.Root>
+  );
+  const { rerender } = render(player(false));
+  const media = screen.getByLabelText<HTMLVideoElement>('Reely media');
+  const mute = vi.spyOn(handle.current!, 'mute');
+  const unmute = vi.spyOn(handle.current!, 'unmute');
+
+  rerender(player(true));
+  rerender(player(false));
+  expect(media.muted).toBe(true);
+
+  fireEvent.volumeChange(media);
+  expect(handle.current?.getState().muted).toBe(true);
+  expect(media.muted).toBe(false);
+  fireEvent.volumeChange(media);
+  fireEvent.volumeChange(media);
+
+  expect(handle.current?.getState().muted).toBe(false);
+  expect(media.muted).toBe(false);
+  expect(onMutedChange).not.toHaveBeenCalled();
+  expect(mute).toHaveBeenCalledTimes(1);
+  expect(unmute).toHaveBeenCalledTimes(1);
+});
+
+test('supersedes a delayed volume confirmation after a rapid controlled reversal', () => {
+  const onVolumeChange = vi.fn();
+  const handle = createRef<Player.PlayerHandle>();
+  const player = (volume: number) => (
+    <Player.Root
+      onVolumeChange={onVolumeChange}
+      ref={handle}
+      source="/tracer.mp4"
+      volume={volume}
+    >
+      <Player.Media />
+    </Player.Root>
+  );
+  const { rerender } = render(player(0.7));
+  const media = screen.getByLabelText<HTMLVideoElement>('Reely media');
+  const setVolume = vi.spyOn(handle.current!, 'setVolume');
+
+  rerender(player(0.2));
+  rerender(player(0.7));
+  expect(media.volume).toBe(0.2);
+
+  fireEvent.volumeChange(media);
+  expect(handle.current?.getState().volume).toBe(0.2);
+  expect(media.volume).toBe(0.7);
+  fireEvent.volumeChange(media);
+  fireEvent.volumeChange(media);
+
+  expect(handle.current?.getState().volume).toBe(0.7);
+  expect(media.volume).toBe(0.7);
+  expect(onVolumeChange).not.toHaveBeenCalled();
+  expect(setVolume.mock.calls).toEqual([[0.2], [0.7]]);
+});
+
+test('supersedes a delayed rate confirmation after a rapid controlled reversal', () => {
+  const onPlaybackRateChange = vi.fn();
+  const handle = createRef<Player.PlayerHandle>();
+  const player = (playbackRate: number) => (
+    <Player.Root
+      onPlaybackRateChange={onPlaybackRateChange}
+      playbackRate={playbackRate}
+      ref={handle}
+      source="/tracer.mp4"
+    >
+      <Player.Media />
+    </Player.Root>
+  );
+  const { rerender } = render(player(1.25));
+  const media = screen.getByLabelText<HTMLVideoElement>('Reely media');
+  const setPlaybackRate = vi.spyOn(handle.current!, 'setPlaybackRate');
+
+  rerender(player(2));
+  rerender(player(1.25));
+  expect(media.playbackRate).toBe(2);
+
+  fireEvent.rateChange(media);
+  expect(handle.current?.getState().playbackRate).toBe(2);
+  expect(media.playbackRate).toBe(1.25);
+  fireEvent.rateChange(media);
+  fireEvent.rateChange(media);
+
+  expect(handle.current?.getState().playbackRate).toBe(1.25);
+  expect(media.playbackRate).toBe(1.25);
+  expect(onPlaybackRateChange).not.toHaveBeenCalled();
+  expect(setPlaybackRate.mock.calls).toEqual([[2], [1.25]]);
+});
+
+test('clears retired volume targets when queued confirmations coalesce to the latest value', () => {
+  const callbackMediaValues: number[] = [];
+  const onVolumeChange = vi.fn((value: number) => {
+    const media = screen.getByLabelText<HTMLVideoElement>('Reely media');
+    callbackMediaValues.push(media.volume);
+    expect(value).toBe(media.volume);
+  });
+  const handle = createRef<Player.PlayerHandle>();
+  const player = (volume: number) => (
+    <Player.Root
+      onVolumeChange={onVolumeChange}
+      ref={handle}
+      source="/tracer.mp4"
+      volume={volume}
+    >
+      <Player.Media />
+    </Player.Root>
+  );
+  const { rerender } = render(player(0.7));
+  const media = screen.getByLabelText<HTMLVideoElement>('Reely media');
+  const setVolume = vi.spyOn(handle.current!, 'setVolume');
+
+  rerender(player(0.2));
+  rerender(player(0.5));
+  fireEvent.volumeChange(media);
+  fireEvent.volumeChange(media);
+
+  media.volume = 0.2;
+  fireEvent.volumeChange(media);
+  expect(onVolumeChange).toHaveBeenCalledExactlyOnceWith(0.2);
+  expect(callbackMediaValues).toEqual([0.2]);
+  expect(media.volume).toBe(0.5);
+  fireEvent.volumeChange(media);
+  fireEvent.volumeChange(media);
+
+  expect(handle.current?.getState().volume).toBe(0.5);
+  expect(onVolumeChange).toHaveBeenCalledTimes(1);
+  expect(setVolume.mock.calls).toEqual([[0.2], [0.5], [0.5]]);
+});
+
+test('clears repeated retired rate targets after the latest active confirmation', () => {
+  const callbackMediaValues: number[] = [];
+  const onPlaybackRateChange = vi.fn((value: number) => {
+    const media = screen.getByLabelText<HTMLVideoElement>('Reely media');
+    callbackMediaValues.push(media.playbackRate);
+    expect(value).toBe(media.playbackRate);
+  });
+  const handle = createRef<Player.PlayerHandle>();
+  const player = (playbackRate: number) => (
+    <Player.Root
+      onPlaybackRateChange={onPlaybackRateChange}
+      playbackRate={playbackRate}
+      ref={handle}
+      source="/tracer.mp4"
+    >
+      <Player.Media />
+    </Player.Root>
+  );
+  const { rerender } = render(player(1));
+  const media = screen.getByLabelText<HTMLVideoElement>('Reely media');
+  const setPlaybackRate = vi.spyOn(handle.current!, 'setPlaybackRate');
+
+  rerender(player(2));
+  rerender(player(1));
+  rerender(player(2));
+  fireEvent.rateChange(media);
+  rerender(player(1.5));
+  fireEvent.rateChange(media);
+
+  media.playbackRate = 2;
+  fireEvent.rateChange(media);
+  expect(onPlaybackRateChange).toHaveBeenCalledExactlyOnceWith(2);
+  expect(callbackMediaValues).toEqual([2]);
+  expect(media.playbackRate).toBe(1.5);
+  fireEvent.rateChange(media);
+  fireEvent.rateChange(media);
+
+  expect(handle.current?.getState().playbackRate).toBe(1.5);
+  expect(onPlaybackRateChange).toHaveBeenCalledTimes(1);
+  expect(setPlaybackRate.mock.calls).toEqual([[2], [2], [1.5], [1.5]]);
+});
+
+test('clears retired muted targets when a reversal confirmation coalesces to current', () => {
+  const callbackMediaValues: boolean[] = [];
+  const onMutedChange = vi.fn((value: boolean) => {
+    const media = screen.getByLabelText<HTMLVideoElement>('Reely media');
+    callbackMediaValues.push(media.muted);
+    expect(value).toBe(media.muted);
+  });
+  const handle = createRef<Player.PlayerHandle>();
+  const player = (muted: boolean) => (
+    <Player.Root
+      muted={muted}
+      onMutedChange={onMutedChange}
+      ref={handle}
+      source="/tracer.mp4"
+    >
+      <Player.Media />
+    </Player.Root>
+  );
+  const { rerender } = render(player(false));
+  const media = screen.getByLabelText<HTMLVideoElement>('Reely media');
+  const mute = vi.spyOn(handle.current!, 'mute');
+  const unmute = vi.spyOn(handle.current!, 'unmute');
+
+  rerender(player(true));
+  rerender(player(false));
+  media.muted = false;
+  fireEvent.volumeChange(media);
+
+  media.muted = true;
+  fireEvent.volumeChange(media);
+  expect(onMutedChange).toHaveBeenCalledExactlyOnceWith(true);
+  expect(callbackMediaValues).toEqual([true]);
+  expect(media.muted).toBe(false);
+  fireEvent.volumeChange(media);
+  fireEvent.volumeChange(media);
+
+  expect(handle.current?.getState().muted).toBe(false);
+  expect(onMutedChange).toHaveBeenCalledTimes(1);
+  expect(mute).toHaveBeenCalledTimes(1);
+  expect(unmute).toHaveBeenCalledTimes(1);
+});
+
+test('reports confirmed controlled conflicts before restoring controlled values', () => {
+  const mediaAtMutedCallback: boolean[] = [];
+  const mediaAtVolumeCallback: number[] = [];
+  const mediaAtRateCallback: number[] = [];
+  const onMutedChange = vi.fn((value: boolean) => {
+    const confirmed = screen.getByLabelText<HTMLVideoElement>('Reely media');
+    mediaAtMutedCallback.push(confirmed.muted);
+    expect(value).toBe(confirmed.muted);
+  });
+  const onVolumeChange = vi.fn((value: number) => {
+    const confirmed = screen.getByLabelText<HTMLVideoElement>('Reely media');
+    mediaAtVolumeCallback.push(confirmed.volume);
+    expect(value).toBe(confirmed.volume);
+  });
+  const onPlaybackRateChange = vi.fn((value: number) => {
+    const confirmed = screen.getByLabelText<HTMLVideoElement>('Reely media');
+    mediaAtRateCallback.push(confirmed.playbackRate);
+    expect(value).toBe(confirmed.playbackRate);
+  });
+  render(
+    <Player.Root
+      muted={false}
+      onMutedChange={onMutedChange}
+      onPlaybackRateChange={onPlaybackRateChange}
+      onVolumeChange={onVolumeChange}
+      playbackRate={1.25}
+      source="/tracer.mp4"
+      volume={0.7}
+    >
+      <Player.Media />
+    </Player.Root>
+  );
+  const media = screen.getByLabelText<HTMLVideoElement>('Reely media');
+
+  media.muted = true;
+  media.volume = 0.2;
+  fireEvent.volumeChange(media);
+  media.playbackRate = 2;
+  fireEvent.rateChange(media);
+
+  expect(onMutedChange).toHaveBeenCalledExactlyOnceWith(true);
+  expect(onVolumeChange).toHaveBeenCalledExactlyOnceWith(0.2);
+  expect(onPlaybackRateChange).toHaveBeenCalledExactlyOnceWith(2);
+  expect(mediaAtMutedCallback).toEqual([true]);
+  expect(mediaAtVolumeCallback).toEqual([0.2]);
+  expect(mediaAtRateCallback).toEqual([2]);
+  expect(media.muted).toBe(false);
+  expect(media.volume).toBe(0.7);
+  expect(media.playbackRate).toBe(1.25);
+
+  fireEvent.volumeChange(media);
+  fireEvent.rateChange(media);
+  expect(onMutedChange).toHaveBeenCalledTimes(1);
+  expect(onVolumeChange).toHaveBeenCalledTimes(1);
+  expect(onPlaybackRateChange).toHaveBeenCalledTimes(1);
+});
+
+test('keeps autoplay disabled by default', () => {
+  const play = vi
+    .spyOn(HTMLMediaElement.prototype, 'play')
+    .mockResolvedValue(undefined);
+  render(
+    <Player.Root source="/tracer.mp4">
+      <Player.Media />
+      <Player.PlayButton />
+    </Player.Root>
+  );
+
+  confirmMetadataReady(screen.getByLabelText('Reely media'));
+
+  expect(play).not.toHaveBeenCalled();
+  expect(
+    screen.getByRole('button', { name: 'Play' }).dataset.autoplayState
+  ).toBe('idle');
+});
+
+test('mutes before autoplay and reports attempting then confirmed started', async () => {
+  const observedMutedAtPlay: boolean[] = [];
+  const onMutedChange = vi.fn();
+  vi.spyOn(HTMLMediaElement.prototype, 'play').mockImplementation(function (
+    this: HTMLMediaElement
+  ) {
+    observedMutedAtPlay.push(this.muted);
+    this.dispatchEvent(new Event('play'));
+    return Promise.resolve();
+  });
+  render(
+    <Player.Root
+      autoplay="muted"
+      onMutedChange={onMutedChange}
+      source="/tracer.mp4"
+    >
+      <Player.Media />
+      <Player.PlayButton />
+    </Player.Root>
+  );
+  const media = screen.getByLabelText<HTMLVideoElement>('Reely media');
+
+  confirmMetadataReady(media);
+  expect(screen.getByRole('button').dataset.autoplayState).toBe('attempting');
+  fireEvent.volumeChange(media);
+
+  await waitFor(() =>
+    expect(screen.getByRole('button').dataset.autoplayState).toBe('started')
+  );
+  expect(observedMutedAtPlay).toEqual([true]);
+  expect(onMutedChange).toHaveBeenCalledExactlyOnceWith(true);
+});
+
+test('attempts audible autoplay without muting', async () => {
+  const mediaMutedAtPlay: boolean[] = [];
+  vi.spyOn(HTMLMediaElement.prototype, 'play').mockImplementation(function (
+    this: HTMLMediaElement
+  ) {
+    mediaMutedAtPlay.push(this.muted);
+    this.dispatchEvent(new Event('play'));
+    return Promise.resolve();
+  });
+  render(
+    <Player.Root autoplay="audible" source="/tracer.mp4">
+      <Player.Media />
+      <Player.PlayButton />
+    </Player.Root>
+  );
+
+  confirmMetadataReady(screen.getByLabelText('Reely media'));
+
+  await waitFor(() =>
+    expect(screen.getByRole('button').dataset.autoplayState).toBe('started')
+  );
+  expect(mediaMutedAtPlay).toEqual([false]);
+});
+
+test.each([
+  ['blocked', new DOMException('Playback blocked.', 'NotAllowedError')],
+  ['failed', new Error('Playback failed.')]
+])('reports %s autoplay attempts', async (state, error) => {
+  vi.spyOn(HTMLMediaElement.prototype, 'play').mockRejectedValue(error);
+  render(
+    <Player.Root autoplay="audible" source="/tracer.mp4">
+      <Player.Media />
+      <Player.PlayButton />
+    </Player.Root>
+  );
+
+  confirmMetadataReady(screen.getByLabelText('Reely media'));
+
+  await waitFor(() =>
+    expect(screen.getByRole('button').dataset.autoplayState).toBe(state)
+  );
+});
+
+test('keeps blocked autoplay focusable and retries only from a user-origin click', async () => {
+  const origins: string[] = [];
+  const play = vi
+    .spyOn(HTMLMediaElement.prototype, 'play')
+    .mockRejectedValueOnce(
+      new DOMException('Playback blocked.', 'NotAllowedError')
+    )
+    .mockImplementation(function (this: HTMLMediaElement) {
+      this.dispatchEvent(new Event('play'));
+      return Promise.resolve();
+    });
+  const handle = createRef<Player.PlayerHandle>();
+  render(
+    <Player.Root autoplay="audible" ref={handle} source="/tracer.mp4">
+      <Player.Media />
+      <Player.PlayButton />
+    </Player.Root>
+  );
+  handle.current?.on('play', (event) => origins.push(event.origin));
+  confirmMetadataReady(screen.getByLabelText('Reely media'));
+  await waitFor(() =>
+    expect(screen.getByRole('button').dataset.autoplayState).toBe('blocked')
+  );
+
+  const button = screen.getByRole('button', { name: 'Play' });
+  expect(button.tabIndex).toBe(0);
+  expect(play).toHaveBeenCalledTimes(1);
+  fireEvent.click(button);
+
+  await waitFor(() => expect(origins).toEqual(['user']));
+  expect(play).toHaveBeenCalledTimes(2);
+});
+
+test('reports the controlled-unmuted conflict without trying muted autoplay', () => {
+  const play = vi
+    .spyOn(HTMLMediaElement.prototype, 'play')
+    .mockResolvedValue(undefined);
+  const handle = createRef<Player.PlayerHandle>();
+  render(
+    <Player.Root
+      autoplay="muted"
+      muted={false}
+      ref={handle}
+      source="/tracer.mp4"
+    >
+      <Player.Media />
+      <Player.PlayButton />
+    </Player.Root>
+  );
+
+  confirmMetadataReady(screen.getByLabelText('Reely media'));
+
+  expect(screen.getByRole('button').dataset.autoplayState).toBe('failed');
+  expect(handle.current?.getState().error?.category).toBe('configuration');
+  expect(play).not.toHaveBeenCalled();
+});
 
 test('keeps confirmed paused state when the media play command rejects', async () => {
   const unhandledRejections: unknown[] = [];
@@ -289,6 +962,57 @@ test('passes loop and playback boundaries from Root to the native adapter', asyn
   await Promise.resolve();
   expect(media.currentTime).toBe(3);
   expect(play).toHaveBeenCalledOnce();
+});
+
+test('replaces the provider once when native playback options change', async () => {
+  const load = vi
+    .spyOn(HTMLMediaElement.prototype, 'load')
+    .mockImplementation(() => undefined);
+  const play = vi
+    .spyOn(HTMLMediaElement.prototype, 'play')
+    .mockImplementation(function (this: HTMLMediaElement) {
+      this.dispatchEvent(new Event('play'));
+      return Promise.resolve();
+    });
+  const handle = createRef<Player.PlayerHandle>();
+  const player = (startTime: number) => (
+    <Player.Root
+      autoplay="audible"
+      ref={handle}
+      source="/tracer.mp4"
+      startTime={startTime}
+    >
+      <Player.Media />
+      <Player.PlayButton />
+    </Player.Root>
+  );
+  const { rerender } = render(player(0));
+  const media = screen.getByLabelText<HTMLVideoElement>('Reely media');
+  confirmMetadataReady(media);
+  await waitFor(() => expect(play).toHaveBeenCalledOnce());
+  await waitFor(() => expect(load).toHaveBeenCalledOnce());
+  play.mockClear();
+  load.mockClear();
+  const providerStates: Array<string | null> = [];
+  const unsubscribe = handle.current?.subscribe((state) =>
+    providerStates.push(state.provider)
+  );
+  providerStates.length = 0;
+
+  rerender(player(1));
+  await waitFor(() => expect(play).toHaveBeenCalled());
+  await waitFor(() => expect(load).toHaveBeenCalled());
+  await new Promise((resolve) => setTimeout(resolve, 0));
+
+  expect(play).toHaveBeenCalledTimes(1);
+  expect(load).toHaveBeenCalledTimes(1);
+  expect(providerStates).toEqual(expect.arrayContaining(['native']));
+  expect(providerStates).not.toContain(null);
+  expect(handle.current?.getState()).toMatchObject({
+    provider: 'native',
+    autoplay: 'started'
+  });
+  unsubscribe?.();
 });
 
 test('destroys the previous native adapter and ignores its stale events on source switch', async () => {

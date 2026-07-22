@@ -24,6 +24,12 @@ export type CommandResult =
   | { ok: true }
   | { ok: false; reason: CommandFailureReason; error?: PlayerError };
 
+export type AutoplayMode = false | 'muted' | 'audible';
+
+export type AutoplayConfigurationOptions = {
+  readonly controlledMuted?: boolean;
+};
+
 export type Availability =
   | { readonly status: 'available' }
   | {
@@ -270,6 +276,14 @@ const toProviderError = (cause: unknown): PlayerError =>
     message:
       cause instanceof Error ? cause.message : 'The provider command failed.',
     cause
+  });
+
+const autoplayConfigurationError = (): PlayerError =>
+  freezeError({
+    category: 'configuration',
+    fatal: false,
+    recoverable: true,
+    message: 'Muted autoplay conflicts with a controlled unmuted state.'
   });
 
 const destroyProviderSafely = (provider: ProviderAdapter): void => {
@@ -524,6 +538,51 @@ export class PlayerController {
   >();
   #state = createInitialPlayerState();
   #generation = 0;
+  #autoplayMode: AutoplayMode = false;
+  #autoplayControlledMuted: boolean | undefined;
+  #hasAutoplayConfigurationError = false;
+  #autoplayConfigurationRevision = 0;
+  #autoplayAttemptGeneration: number | undefined;
+  #pendingPlaybackOrigin:
+    | {
+        readonly generation: number;
+        readonly origin: PlayerEventOrigin;
+        readonly playback: PlaybackState;
+      }
+    | undefined;
+
+  configureAutoplay = (
+    mode: AutoplayMode,
+    options: AutoplayConfigurationOptions = {}
+  ): void => {
+    if (
+      mode === this.#autoplayMode &&
+      options.controlledMuted === this.#autoplayControlledMuted
+    )
+      return;
+    const hadConfigurationError = this.#hasAutoplayConfigurationError;
+    this.#autoplayMode = mode;
+    this.#autoplayControlledMuted = options.controlledMuted;
+    this.#hasAutoplayConfigurationError =
+      mode === 'muted' && options.controlledMuted === false;
+    this.#autoplayConfigurationRevision += 1;
+    if (this.#pendingPlaybackOrigin?.origin === 'autoplay') {
+      this.#pendingPlaybackOrigin = undefined;
+    }
+    this.#applyPatch({
+      autoplay: this.#hasAutoplayConfigurationError ? 'failed' : 'idle',
+      error: this.#hasAutoplayConfigurationError
+        ? this.#state.lifecycle === 'error' &&
+          this.#state.error?.category !== 'configuration'
+          ? this.#state.error
+          : autoplayConfigurationError()
+        : hadConfigurationError &&
+            this.#state.error?.category === 'configuration'
+          ? null
+          : this.#state.error
+    });
+    this.#synchronizeAutoplay();
+  };
 
   setProvider = (provider: ProviderAdapter | undefined): void => {
     const alreadyDetached =
@@ -536,6 +595,7 @@ export class PlayerController {
       (provider !== undefined || alreadyDetached)
     )
       return;
+    this.#pendingPlaybackOrigin = undefined;
     const generation = ++this.#generation;
     const unsubscribe = this.#unsubscribe;
     const previousProvider = this.#provider;
@@ -548,26 +608,46 @@ export class PlayerController {
     if (generation !== this.#generation) return;
     this.#provider = provider;
     if (!provider) {
-      this.#setState(createInitialPlayerState());
+      this.#setState(
+        this.#withAutoplayConfiguration(createInitialPlayerState())
+      );
       return;
     }
 
-    this.#setState({
-      ...createInitialPlayerState(),
-      lifecycle: 'loading',
-      activation: 'loading-provider',
-      provider: provider.provider
-    });
+    this.#setState(
+      this.#withAutoplayConfiguration({
+        ...createInitialPlayerState(),
+        lifecycle: 'loading',
+        activation: 'loading-provider',
+        provider: provider.provider
+      })
+    );
     if (generation !== this.#generation || provider !== this.#provider) return;
     let nextUnsubscribe: (() => void) | undefined;
     try {
       nextUnsubscribe = provider.subscribe((patch, event) => {
         if (generation !== this.#generation) return;
+        const confirmedPlaybackOrigin =
+          patch.playback !== undefined
+            ? this.#consumePendingPlaybackOrigin(generation, patch.playback)
+            : undefined;
         const originatingEvent = event
-          ? { ...event, provider: provider.provider }
+          ? {
+              ...event,
+              origin:
+                ((event.type === 'play' && patch.playback === 'playing') ||
+                  (event.type === 'pause' && patch.playback === 'paused')) &&
+                confirmedPlaybackOrigin
+                  ? confirmedPlaybackOrigin
+                  : event.origin,
+              provider: provider.provider
+            }
           : undefined;
-        this.#applyPatch(patch);
+        this.#applyPatch(patch, false);
         if (originatingEvent) this.#emitEvent(originatingEvent);
+        if (generation !== this.#generation || provider !== this.#provider)
+          return;
+        this.#synchronizeAutoplay();
       });
     } catch (cause) {
       if (generation !== this.#generation || provider !== this.#provider) {
@@ -620,10 +700,27 @@ export class PlayerController {
     return () => listeners.delete(keyedListener);
   };
 
-  play = (): Promise<CommandResult> => this.#command('play');
-  pause = (): Promise<CommandResult> => this.#command('pause');
+  play = (): Promise<CommandResult> => this.playWithOrigin('api');
+  playWithOrigin = (origin: PlayerEventOrigin): Promise<CommandResult> => {
+    const provider = this.#provider;
+    if (!provider) return Promise.resolve({ ok: false, reason: 'not-ready' });
+    return this.#playWithOrigin(provider, this.#generation, origin);
+  };
+  pause = (): Promise<CommandResult> => this.pauseWithOrigin('api');
+  pauseWithOrigin = (origin: PlayerEventOrigin): Promise<CommandResult> => {
+    this.#pendingPlaybackOrigin = undefined;
+    const provider = this.#provider;
+    if (!provider) return Promise.resolve({ ok: false, reason: 'not-ready' });
+    return this.#pauseWithOrigin(provider, this.#generation, origin);
+  };
   togglePlayback = (): Promise<CommandResult> =>
-    this.#state.playback === 'playing' ? this.pause() : this.play();
+    this.togglePlaybackWithOrigin('api');
+  togglePlaybackWithOrigin = (
+    origin: PlayerEventOrigin
+  ): Promise<CommandResult> =>
+    this.#state.playback === 'playing'
+      ? this.pauseWithOrigin(origin)
+      : this.playWithOrigin(origin);
   seekTo = (time: number): Promise<CommandResult> =>
     this.#command('seekTo', time);
   seekBy = (offset: number): Promise<CommandResult> =>
@@ -750,7 +847,12 @@ export class PlayerController {
     this.#listeners.forEach((listener) => listener(snapshot));
   };
 
-  #applyPatch = (patch: ProviderStatePatch): void => {
+  #applyPatch = (patch: ProviderStatePatch, acceptAutoplay = true): void => {
+    const explicitProviderError =
+      patch.error !== undefined &&
+      patch.error !== null &&
+      (patch.lifecycle === 'error' || patch.error.fatal);
+    const nextLifecycle = patch.lifecycle ?? this.#state.lifecycle;
     const nextState: PlayerState = {
       ...this.#state,
       ...patch,
@@ -766,16 +868,184 @@ export class PlayerController {
         patch.capabilities === undefined
           ? this.#state.capabilities
           : freezeCapabilities(patch.capabilities),
-      error:
-        patch.lifecycle === 'ready' && patch.error === undefined
-          ? null
-          : patch.error === undefined
+      autoplay: this.#hasAutoplayConfigurationError
+        ? 'failed'
+        : patch.playback === 'playing' && this.#state.autoplay === 'attempting'
+          ? 'started'
+          : acceptAutoplay
+            ? (patch.autoplay ?? this.#state.autoplay)
+            : this.#state.autoplay,
+      error: explicitProviderError
+        ? freezeError(patch.error)
+        : this.#hasAutoplayConfigurationError
+          ? nextLifecycle === 'error' &&
+            this.#state.error?.category !== 'configuration'
             ? this.#state.error
-            : patch.error === null
-              ? null
-              : freezeError(patch.error)
+            : autoplayConfigurationError()
+          : patch.lifecycle === 'ready' && patch.error === undefined
+            ? null
+            : patch.error === undefined
+              ? this.#state.error
+              : patch.error === null
+                ? null
+                : freezeError(patch.error)
     };
     this.#setState(nextState);
+  };
+
+  #withAutoplayConfiguration = (state: PlayerState): PlayerState =>
+    this.#hasAutoplayConfigurationError
+      ? {
+          ...state,
+          autoplay: 'failed',
+          error: autoplayConfigurationError()
+        }
+      : state;
+
+  #synchronizeAutoplay = (): void => {
+    const provider = this.#provider;
+    const generation = this.#generation;
+    if (
+      !provider ||
+      this.#autoplayMode === false ||
+      this.#hasAutoplayConfigurationError ||
+      this.#state.lifecycle !== 'ready' ||
+      this.#state.activation !== 'ready' ||
+      this.#autoplayAttemptGeneration === generation
+    ) {
+      return;
+    }
+
+    const mode = this.#autoplayMode;
+    const revision = this.#autoplayConfigurationRevision;
+    this.#autoplayAttemptGeneration = generation;
+    this.#applyPatch({ autoplay: 'attempting' });
+    if (!this.#isCurrentAutoplayAttempt(provider, generation, revision, mode))
+      return;
+    void this.#attemptAutoplay(provider, generation, revision, mode);
+  };
+
+  #attemptAutoplay = async (
+    provider: ProviderAdapter,
+    generation: number,
+    revision: number,
+    mode: Exclude<AutoplayMode, false>
+  ): Promise<void> => {
+    if (mode === 'muted') {
+      const muteResult = await this.#providerCommand(provider, 'mute');
+      if (!this.#isCurrentAutoplayAttempt(provider, generation, revision, mode))
+        return;
+      if (!muteResult.ok) {
+        this.#applyAutoplayFailure(
+          muteResult,
+          provider,
+          generation,
+          revision,
+          mode
+        );
+        return;
+      }
+    }
+
+    const playResult = await this.#playWithOrigin(
+      provider,
+      generation,
+      'autoplay'
+    );
+    if (!this.#isCurrentAutoplayAttempt(provider, generation, revision, mode))
+      return;
+    if (!playResult.ok) {
+      this.#applyAutoplayFailure(
+        playResult,
+        provider,
+        generation,
+        revision,
+        mode
+      );
+    }
+  };
+
+  #applyAutoplayFailure = (
+    result: Extract<CommandResult, { ok: false }>,
+    provider: ProviderAdapter,
+    generation: number,
+    revision: number,
+    mode: Exclude<AutoplayMode, false>
+  ): void => {
+    if (
+      !this.#isCurrentAutoplayAttempt(provider, generation, revision, mode) ||
+      this.#state.autoplay !== 'attempting'
+    )
+      return;
+    this.#applyPatch({
+      autoplay: result.reason === 'blocked' ? 'blocked' : 'failed',
+      error: result.error ?? null
+    });
+  };
+
+  #isCurrentAutoplayAttempt = (
+    provider: ProviderAdapter,
+    generation: number,
+    revision: number,
+    mode: Exclude<AutoplayMode, false>
+  ): boolean =>
+    provider === this.#provider &&
+    generation === this.#generation &&
+    revision === this.#autoplayConfigurationRevision &&
+    mode === this.#autoplayMode &&
+    !this.#hasAutoplayConfigurationError;
+
+  #playWithOrigin = async (
+    provider: ProviderAdapter,
+    generation: number,
+    origin: PlayerEventOrigin
+  ): Promise<CommandResult> => {
+    const request = { generation, origin, playback: 'playing' as const };
+    this.#pendingPlaybackOrigin = request;
+    const result = await this.#providerCommand(provider, 'play');
+    if (
+      !result.ok &&
+      provider === this.#provider &&
+      generation === this.#generation &&
+      this.#pendingPlaybackOrigin === request
+    ) {
+      this.#pendingPlaybackOrigin = undefined;
+    }
+    return result;
+  };
+
+  #pauseWithOrigin = async (
+    provider: ProviderAdapter,
+    generation: number,
+    origin: PlayerEventOrigin
+  ): Promise<CommandResult> => {
+    const request = { generation, origin, playback: 'paused' as const };
+    this.#pendingPlaybackOrigin = request;
+    const result = await this.#providerCommand(provider, 'pause');
+    if (
+      !result.ok &&
+      provider === this.#provider &&
+      generation === this.#generation &&
+      this.#pendingPlaybackOrigin === request
+    ) {
+      this.#pendingPlaybackOrigin = undefined;
+    }
+    return result;
+  };
+
+  #consumePendingPlaybackOrigin = (
+    generation: number,
+    playback: PlaybackState
+  ): PlayerEventOrigin | undefined => {
+    const pending = this.#pendingPlaybackOrigin;
+    if (
+      !pending ||
+      pending.generation !== generation ||
+      pending.playback !== playback
+    )
+      return undefined;
+    this.#pendingPlaybackOrigin = undefined;
+    return pending.origin;
   };
 
   #emitEvent = (event: ProviderEvent): void => {
