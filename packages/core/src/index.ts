@@ -225,12 +225,24 @@ export const detectSource = (input: unknown): SourceDetectionResult => {
       return failure(input, 'unsupported-string');
     }
 
+    const isNetworkPath = input.startsWith('//');
+    if (isNetworkPath && !/^\/\/[^/]/.test(input)) {
+      return failure(input, 'malformed-string');
+    }
+
+    const urlInput = isNetworkPath
+      ? `https:${input}`
+      : scheme
+        ? input
+        : undefined;
+    if (scheme && !/^https?:\/\//i.test(input)) {
+      return failure(input, 'malformed-string');
+    }
+
     let url: URL | undefined;
-    if (scheme) {
-      if (!/^https?:\/\//i.test(input))
-        return failure(input, 'malformed-string');
+    if (urlInput) {
       try {
-        url = new URL(input);
+        url = new URL(urlInput);
       } catch {
         return failure(input, 'malformed-string');
       }

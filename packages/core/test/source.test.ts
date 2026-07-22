@@ -2,8 +2,11 @@
 
 import { expect, test } from 'vitest';
 import {
+  PlayerController,
   detectSource,
   type HlsSource,
+  type MediaProvider,
+  type PlaybackState,
   type VideoFileSource,
   type VimeoSource,
   type YouTubeSource
@@ -188,6 +191,31 @@ test.each(['https://youtube.com/embed/id.mp4', 'https://vimeo.com/123.mp4'])(
   }
 );
 
+test.each(['//youtube.com/embed/id.mp4', '//vimeo.com/123.m3u8'])(
+  'applies known-provider grammar to network-path references: %s',
+  (input) => {
+    expect(detectSource(input)).toMatchObject({
+      status: 'failure',
+      input,
+      reason: 'malformed-string'
+    });
+  }
+);
+
+test('detects a generic file on an unknown network-path host', () => {
+  expect(expectDetected('//cdn.example.com/video.mp4').source).toEqual({
+    type: 'video',
+    sources: [{ src: '//cdn.example.com/video.mp4', mimeType: 'video/mp4' }]
+  });
+});
+
+test('detects a valid provider network-path reference', () => {
+  expect(expectDetected('//youtu.be/abc123').source).toEqual({
+    type: 'youtube',
+    videoId: 'abc123'
+  });
+});
+
 test.each([
   'https://player.vimeo.com/video/not-a-number',
   'https://player.vimeo.com/video/123456789/%25',
@@ -210,4 +238,86 @@ test('continues to accept ordinary relative file paths', () => {
 
 test('imports and runs source detection in Node without browser globals', () => {
   expect(expectDetected('/server-rendered.mp4').source.type).toBe('video');
+});
+
+const createTestProvider = () => {
+  let listener: ((state: PlaybackState) => void) | undefined;
+  let destroyCount = 0;
+  let subscribeCount = 0;
+  let unsubscribeCount = 0;
+  const provider: MediaProvider = {
+    play: async () => undefined,
+    pause: () => undefined,
+    subscribe: (nextListener) => {
+      subscribeCount += 1;
+      listener = nextListener;
+      return () => {
+        unsubscribeCount += 1;
+        listener = undefined;
+      };
+    },
+    destroy: () => {
+      destroyCount += 1;
+    }
+  };
+
+  return {
+    provider,
+    emit: (state: PlaybackState) => listener?.(state),
+    counts: () => ({ destroyCount, subscribeCount, unsubscribeCount })
+  };
+};
+
+test('setting the same provider is a no-op', () => {
+  const controller = new PlayerController();
+  const testProvider = createTestProvider();
+  controller.setProvider(testProvider.provider);
+  testProvider.emit('playing');
+
+  controller.setProvider(testProvider.provider);
+
+  expect(controller.getState()).toBe('playing');
+  expect(testProvider.counts()).toEqual({
+    destroyCount: 0,
+    subscribeCount: 1,
+    unsubscribeCount: 0
+  });
+});
+
+test('replacing a provider cleans up the old provider and resets state', () => {
+  const controller = new PlayerController();
+  const firstProvider = createTestProvider();
+  const secondProvider = createTestProvider();
+  controller.setProvider(firstProvider.provider);
+  firstProvider.emit('playing');
+
+  controller.setProvider(secondProvider.provider);
+
+  expect(controller.getState()).toBe('paused');
+  expect(firstProvider.counts()).toEqual({
+    destroyCount: 1,
+    subscribeCount: 1,
+    unsubscribeCount: 1
+  });
+  expect(secondProvider.counts()).toEqual({
+    destroyCount: 0,
+    subscribeCount: 1,
+    unsubscribeCount: 0
+  });
+});
+
+test('removing a provider cleans it up and resets state', () => {
+  const controller = new PlayerController();
+  const testProvider = createTestProvider();
+  controller.setProvider(testProvider.provider);
+  testProvider.emit('playing');
+
+  controller.setProvider(undefined);
+
+  expect(controller.getState()).toBe('paused');
+  expect(testProvider.counts()).toEqual({
+    destroyCount: 1,
+    subscribeCount: 1,
+    unsubscribeCount: 1
+  });
 });
