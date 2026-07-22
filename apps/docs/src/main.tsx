@@ -17,14 +17,21 @@ const App = () => (
     <p>
       <code>Player.Root</code> accepts MP4, WebM, HLS, YouTube, and Vimeo
       strings, or an explicit source object. The native tracer above remains a
-      working MP4 example.
+      working MP4 example. HLS and provider strings are detected in this issue,
+      but <code>Player.Media</code> does not load them yet.
     </p>
     <pre>{`// String sources
 <Player.Root source="/video.mp4">...</Player.Root>
 <Player.Root source="https://cdn.example.com/video.webm">...</Player.Root>
 <Player.Root source="https://cdn.example.com/master.m3u8">...</Player.Root>
 <Player.Root source="https://www.youtube.com/watch?v=dQw4w9WgXcQ">...</Player.Root>
+<Player.Root source="https://youtu.be/dQw4w9WgXcQ">...</Player.Root>
+<Player.Root source="https://www.youtube.com/embed/dQw4w9WgXcQ">...</Player.Root>
+<Player.Root source="https://www.youtube.com/shorts/dQw4w9WgXcQ">...</Player.Root>
+<Player.Root source="https://vimeo.com/123456789">...</Player.Root>
+<Player.Root source="https://player.vimeo.com/video/123456789">...</Player.Root>
 <Player.Root source="https://player.vimeo.com/video/123456789/a1b2c3">...</Player.Root>
+<Player.Root source="https://vimeo.com/123456789?h=a1b2c3">...</Player.Root>
 
 // Explicit video source (preserves source order and MIME types)
 <Player.Root source={{

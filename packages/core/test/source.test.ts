@@ -13,6 +13,7 @@ const expectDetected = (input: unknown) => {
   const result = detectSource(input);
   expect(result.status).toBe('success');
   if (result.status === 'failure') throw new Error(result.guidance);
+  expect(result.input).toBe(input);
   return result;
 };
 
@@ -71,6 +72,14 @@ test.each([
   });
 });
 
+test('uses the query Vimeo privacy hash when both supported hash forms are present', () => {
+  expect(
+    expectDetected(
+      'https://player.vimeo.com/video/123456789/pathhash?h=queryhash'
+    ).source
+  ).toEqual({ type: 'vimeo', videoId: '123456789', hash: 'queryhash' });
+});
+
 test('accepts and preserves every explicit source object', () => {
   const video: VideoFileSource = {
     type: 'video',
@@ -94,43 +103,85 @@ test('accepts and preserves every explicit source object', () => {
   }
 });
 
-test('rejects signed, extensionless, and unknown URLs with explicit-object guidance', () => {
-  for (const input of [
-    'https://cdn.example.com/video?signature=abc',
-    'https://cdn.example.com/video',
-    'https://example.com/movie.avi'
-  ]) {
-    const result = detectSource(input);
-    expect(result).toMatchObject({
-      status: 'failure',
-      input,
-      reason: 'unsupported-string'
-    });
-    if (result.status === 'failure') {
-      expect(result.guidance).toMatch(/explicit source object/i);
-    }
+test.each([
+  'https://cdn.example.com/video?signature=abc',
+  'https://cdn.example.com/video',
+  'https://example.com/movie.avi',
+  'mailto:clip.mp4',
+  'ftp://host/clip.mp4',
+  'https://notyoutube.com/watch?v=dQw4w9WgXcQ',
+  'https://vimeo.com.evil/123456789'
+])('rejects unsupported strings with explicit-object guidance: %s', (input) => {
+  const result = detectSource(input);
+  expect(result).toMatchObject({
+    status: 'failure',
+    input,
+    reason: 'unsupported-string'
+  });
+  if (result.status === 'failure') {
+    expect(result.guidance).toMatch(/explicit source object/i);
   }
 });
 
-test('rejects malformed strings and invalid explicit objects', () => {
-  for (const input of [
-    '',
-    'https://www.youtube.com/watch',
-    'https://player.vimeo.com/video/not-a-number',
-    { type: 'video', sources: [] },
-    { type: 'video', sources: [{ src: '', mimeType: 'video/mp4' }] },
-    { type: 'hls', src: '', engine: 'native' },
-    { type: 'hls', src: '/master.m3u8', engine: 'other' },
-    { type: 'youtube', videoId: '' },
-    { type: 'vimeo', videoId: '123', hash: '' }
-  ]) {
-    const result = detectSource(input);
-    expect(result.status).toBe('failure');
-    if (result.status === 'failure') {
-      expect(['malformed-string', 'invalid-source']).toContain(result.reason);
-      expect(result.guidance).toMatch(/explicit source object/i);
-    }
+test.each([
+  '',
+  'https://www.youtube.com/watch',
+  'https://www.youtube.com/watch?v=',
+  'https://www.youtube.com/watch?v=dQw4w9WgXcQ&v=another',
+  'https://www.youtube.com/embed/dQw4w9WgXcQ/ignored',
+  'https://www.youtube.com/shorts/dQw4w9WgXcQ/ignored',
+  'https://youtu.be/dQw4w9WgXcQ/ignored',
+  'https://www.youtube.com/embed/%zz',
+  'https://player.vimeo.com/123456789',
+  'https://vimeo.com/video/123456789',
+  'https://vimeo.com/123456789/ignored',
+  'https://player.vimeo.com/video/123456789/pathhash/ignored',
+  'https://player.vimeo.com/video/123456789/%zz'
+])('rejects malformed provider strings: %s', (input) => {
+  expect(detectSource(input)).toMatchObject({
+    status: 'failure',
+    input,
+    reason: 'malformed-string'
+  });
+});
+
+test.each([
+  { type: 'video', sources: [] },
+  { type: 'video', sources: [{ src: '', mimeType: 'video/mp4' }] },
+  { type: 'hls', src: '', engine: 'native' },
+  { type: 'hls', src: '/master.m3u8', engine: 'other' },
+  { type: 'youtube', videoId: '' },
+  { type: 'vimeo', videoId: '123', hash: '' }
+])('rejects invalid explicit source objects: %o', (input) => {
+  const result = detectSource(input);
+  expect(result).toMatchObject({
+    status: 'failure',
+    input,
+    reason: 'invalid-source'
+  });
+  if (result.status === 'failure') {
+    expect(result.guidance).toMatch(/explicit source object/i);
   }
+});
+
+test.each([
+  'https://player.vimeo.com/video/not-a-number',
+  'https://player.vimeo.com/video/123456789/%25',
+  'https://www.youtube.com/shorts/%25'
+])('rejects unusable provider IDs and hashes: %s', (input) => {
+  const result = detectSource(input);
+  expect(result).toMatchObject({
+    status: 'failure',
+    input,
+    reason: 'malformed-string'
+  });
+});
+
+test('continues to accept ordinary relative file paths', () => {
+  expect(expectDetected('media/clip.mp4').source).toEqual({
+    type: 'video',
+    sources: [{ src: 'media/clip.mp4', mimeType: 'video/mp4' }]
+  });
 });
 
 test('imports and runs source detection in Node without browser globals', () => {

@@ -70,6 +70,12 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
 const isNonEmptyString = (value: unknown): value is string =>
   typeof value === 'string' && value.trim().length > 0;
 
+const isYouTubeVideoId = (value: unknown): value is string =>
+  isNonEmptyString(value) && /^[A-Za-z0-9_-]+$/.test(value);
+
+const isVimeoHash = (value: unknown): value is string =>
+  isNonEmptyString(value) && /^[A-Za-z0-9]+$/.test(value);
+
 const failure = (
   input: unknown,
   reason: SourceDetectionFailureReason
@@ -111,30 +117,51 @@ const sourceFromYouTubeUrl = (url: URL): YouTubeSource | undefined => {
   if (!isYouTubeHost(url.hostname)) return undefined;
 
   const segments = url.pathname.split('/').filter(Boolean);
-  const videoId =
-    url.hostname === 'youtu.be' || url.hostname === 'www.youtu.be'
+  const isShortUrl =
+    url.hostname === 'youtu.be' || url.hostname === 'www.youtu.be';
+  const watchVideoIds = url.searchParams.getAll('v');
+  const videoId = isShortUrl
+    ? segments.length === 1
       ? segments[0]
-      : segments[0] === 'watch'
-        ? (url.searchParams.get('v') ?? undefined)
-        : segments[0] === 'embed' || segments[0] === 'shorts'
-          ? segments[1]
-          : undefined;
+      : undefined
+    : segments[0] === 'watch' && segments.length === 1
+      ? watchVideoIds.length === 1
+        ? watchVideoIds[0]
+        : undefined
+      : (segments[0] === 'embed' || segments[0] === 'shorts') &&
+          segments.length === 2
+        ? segments[1]
+        : undefined;
 
-  return isNonEmptyString(videoId) ? { type: 'youtube', videoId } : undefined;
+  return isYouTubeVideoId(videoId) ? { type: 'youtube', videoId } : undefined;
 };
 
 const sourceFromVimeoUrl = (url: URL): VimeoSource | undefined => {
   if (!isVimeoHost(url.hostname)) return undefined;
 
   const segments = url.pathname.split('/').filter(Boolean);
-  const isPlayerUrl = segments[0] === 'video';
-  const videoId = isPlayerUrl ? segments[1] : segments[0];
-  const pathHash = isPlayerUrl ? segments[2] : undefined;
-  const queryHash = url.searchParams.get('h');
+  const isPlayerUrl = url.hostname === 'player.vimeo.com';
+  const videoId = isPlayerUrl
+    ? segments[0] === 'video' &&
+      (segments.length === 2 || segments.length === 3)
+      ? segments[1]
+      : undefined
+    : segments.length === 1
+      ? segments[0]
+      : undefined;
+  const pathHash =
+    isPlayerUrl && segments.length === 3 ? segments[2] : undefined;
+  const queryHashes = url.searchParams.getAll('h');
+  const queryHash = queryHashes.length === 1 ? queryHashes[0] : undefined;
 
   if (!videoId || !/^\d+$/.test(videoId)) return undefined;
-  if (queryHash !== null && !isNonEmptyString(queryHash)) return undefined;
-  if (pathHash !== undefined && !isNonEmptyString(pathHash)) return undefined;
+  if (
+    queryHashes.length > 1 ||
+    (queryHashes.length === 1 && !isVimeoHash(queryHash))
+  ) {
+    return undefined;
+  }
+  if (pathHash !== undefined && !isVimeoHash(pathHash)) return undefined;
 
   const hash = queryHash ?? pathHash;
   return { type: 'vimeo', videoId, ...(hash ? { hash } : {}) };
@@ -194,14 +221,24 @@ export const detectSource = (input: unknown): SourceDetectionResult => {
       return failure(input, 'malformed-string');
     }
 
-    const looksLikeAbsoluteUrl = /^[a-z][a-z\d+.-]*:\/\//i.test(input);
+    if (/%(?![\da-f]{2})/i.test(input)) {
+      return failure(input, 'malformed-string');
+    }
+
+    const scheme = input.match(/^([a-z][a-z\d+.-]*):/i)?.[1]?.toLowerCase();
+    if (scheme && scheme !== 'http' && scheme !== 'https') {
+      return failure(input, 'unsupported-string');
+    }
+
     let url: URL | undefined;
-    try {
-      url = new URL(input);
-      if (url.protocol !== 'http:' && url.protocol !== 'https:')
-        url = undefined;
-    } catch {
-      if (looksLikeAbsoluteUrl) return failure(input, 'malformed-string');
+    if (scheme) {
+      if (!/^https?:\/\//i.test(input))
+        return failure(input, 'malformed-string');
+      try {
+        url = new URL(input);
+      } catch {
+        return failure(input, 'malformed-string');
+      }
     }
 
     const fileSource = sourceFromFileExtension(input);
