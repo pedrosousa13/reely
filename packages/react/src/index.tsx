@@ -391,17 +391,13 @@ export const Root = ({
     };
   }, [controller, reconcileMuted, reconcilePlaybackRate, reconcileVolume]);
 
-  useEffect(
-    () => () => {
-      preferenceUnsubscribe.current?.();
-      controller.setProvider(undefined);
-    },
-    [controller]
-  );
-
   const registerMedia = useCallback(
     (media: HTMLVideoElement | null) => {
-      if (currentMedia.current === media) return;
+      if (
+        currentMedia.current === media &&
+        (media === null || controller.getState().provider !== null)
+      )
+        return;
       currentMedia.current = media;
       pendingMuted.current = undefined;
       pendingVolume.current = undefined;
@@ -411,9 +407,15 @@ export const Root = ({
       supersededPlaybackRate.current.length = 0;
       if (media) {
         media.muted = controlledMuted.current ?? desiredMuted.current;
-        media.volume = controlledVolume.current ?? desiredVolume.current;
-        media.playbackRate =
+        const nextVolume = controlledVolume.current ?? desiredVolume.current;
+        const nextPlaybackRate =
           controlledPlaybackRate.current ?? desiredPlaybackRate.current;
+        if (Number.isFinite(nextVolume)) {
+          media.volume = Math.min(1, Math.max(0, nextVolume));
+        }
+        if (Number.isFinite(nextPlaybackRate) && nextPlaybackRate > 0) {
+          media.playbackRate = nextPlaybackRate;
+        }
         ensurePreferenceSubscription();
         controller.configureAutoplay(autoplayConfiguration.current.autoplay, {
           controlledMuted: autoplayConfiguration.current.muted
@@ -427,6 +429,15 @@ export const Root = ({
     },
     [controller, endTime, ensurePreferenceSubscription, loop, startTime]
   );
+
+  useEffect(() => {
+    registerMedia(currentMedia.current);
+    return () => {
+      preferenceUnsubscribe.current?.();
+      preferenceUnsubscribe.current = undefined;
+      controller.setProvider(undefined);
+    };
+  }, [controller, registerMedia]);
 
   useEffect(() => {
     controller.configureAutoplay(autoplay, { controlledMuted: muted });

@@ -8,7 +8,7 @@ import {
   screen,
   waitFor
 } from '@testing-library/react';
-import { createRef } from 'react';
+import { createRef, StrictMode } from 'react';
 import { afterEach, expect, test, vi } from 'vitest';
 import * as Player from '../src/index';
 
@@ -73,6 +73,87 @@ test('exposes playback preferences without accepting a playing prop', () => {
   expect(onVolumeChange).not.toHaveBeenCalled();
   expect(onPlaybackRateChange).not.toHaveBeenCalled();
   expect(invalidRoot).toBeDefined();
+});
+
+test('keeps provider preferences and autoplay active after StrictMode effect replay', async () => {
+  const onVolumeChange = vi.fn();
+  const handle = createRef<Player.PlayerHandle>();
+  vi.spyOn(HTMLMediaElement.prototype, 'play').mockImplementation(function (
+    this: HTMLMediaElement
+  ) {
+    this.dispatchEvent(new Event('play'));
+    return Promise.resolve();
+  });
+  render(
+    <StrictMode>
+      <Player.Root
+        autoplay="audible"
+        onVolumeChange={onVolumeChange}
+        ref={handle}
+        source="/tracer.mp4"
+        volume={0.7}
+      >
+        <Player.Media />
+        <Player.PlayButton />
+      </Player.Root>
+    </StrictMode>
+  );
+  const media = screen.getByLabelText<HTMLVideoElement>('Reely media');
+
+  expect(handle.current?.getState().provider).toBe('native');
+  media.volume = 0.2;
+  fireEvent.volumeChange(media);
+  expect(onVolumeChange).toHaveBeenCalledExactlyOnceWith(0.2);
+  expect(media.volume).toBe(0.7);
+  fireEvent.volumeChange(media);
+
+  confirmMetadataReady(media);
+  await waitFor(() =>
+    expect(screen.getByRole('button').dataset.autoplayState).toBe('started')
+  );
+  expect(onVolumeChange).toHaveBeenCalledTimes(1);
+});
+
+test('does not assign invalid controlled numeric preferences during media registration', () => {
+  const player = (source: string) => (
+    <Player.Root playbackRate={0} source={source} volume={Number.NaN}>
+      <Player.Media />
+    </Player.Root>
+  );
+  const { rerender } = render(player('/first.mp4'));
+  const firstMedia = screen.getByLabelText<HTMLVideoElement>('Reely media');
+
+  expect(firstMedia.volume).toBe(1);
+  expect(firstMedia.playbackRate).toBe(1);
+  rerender(player('/second.mp4'));
+
+  const replacement = screen.getByLabelText<HTMLVideoElement>('Reely media');
+  expect(replacement).not.toBe(firstMedia);
+  expect(replacement.volume).toBe(1);
+  expect(replacement.playbackRate).toBe(1);
+});
+
+test('clamps finite default volume and skips an invalid default rate on replacement', () => {
+  const player = (source: string) => (
+    <Player.Root
+      defaultPlaybackRate={Number.POSITIVE_INFINITY}
+      defaultVolume={-2}
+      source={source}
+    >
+      <Player.Media />
+    </Player.Root>
+  );
+  const { rerender } = render(player('/first.mp4'));
+  const firstMedia = screen.getByLabelText<HTMLVideoElement>('Reely media');
+
+  expect(firstMedia.volume).toBe(0);
+  expect(firstMedia.playbackRate).toBe(1);
+  rerender(player('/second.mp4'));
+
+  const replacement = screen.getByLabelText<HTMLVideoElement>('Reely media');
+  expect(replacement).not.toBe(firstMedia);
+  expect(replacement.volume).toBe(0);
+  expect(replacement.playbackRate).toBe(1);
 });
 
 test('seeds default preferences once and retains confirmed values across media replacement', () => {
