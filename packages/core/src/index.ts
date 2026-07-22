@@ -539,7 +539,9 @@ export class PlayerController {
   #state = createInitialPlayerState();
   #generation = 0;
   #autoplayMode: AutoplayMode = false;
+  #autoplayControlledMuted: boolean | undefined;
   #hasAutoplayConfigurationError = false;
+  #autoplayConfigurationRevision = 0;
   #autoplayAttemptGeneration: number | undefined;
   #pendingPlaybackOrigin:
     | {
@@ -553,10 +555,20 @@ export class PlayerController {
     mode: AutoplayMode,
     options: AutoplayConfigurationOptions = {}
   ): void => {
+    if (
+      mode === this.#autoplayMode &&
+      options.controlledMuted === this.#autoplayControlledMuted
+    )
+      return;
     const hadConfigurationError = this.#hasAutoplayConfigurationError;
     this.#autoplayMode = mode;
+    this.#autoplayControlledMuted = options.controlledMuted;
     this.#hasAutoplayConfigurationError =
       mode === 'muted' && options.controlledMuted === false;
+    this.#autoplayConfigurationRevision += 1;
+    if (this.#pendingPlaybackOrigin?.origin === 'autoplay') {
+      this.#pendingPlaybackOrigin = undefined;
+    }
     this.#applyPatch({
       autoplay: this.#hasAutoplayConfigurationError ? 'failed' : 'idle',
       error: this.#hasAutoplayConfigurationError
@@ -627,7 +639,7 @@ export class PlayerController {
               provider: provider.provider
             }
           : undefined;
-        this.#applyPatch(patch);
+        this.#applyPatch(patch, false);
         if (originatingEvent) this.#emitEvent(originatingEvent);
         if (generation !== this.#generation || provider !== this.#provider)
           return;
@@ -831,7 +843,7 @@ export class PlayerController {
     this.#listeners.forEach((listener) => listener(snapshot));
   };
 
-  #applyPatch = (patch: ProviderStatePatch): void => {
+  #applyPatch = (patch: ProviderStatePatch, acceptAutoplay = true): void => {
     const nextState: PlayerState = {
       ...this.#state,
       ...patch,
@@ -851,7 +863,9 @@ export class PlayerController {
         ? 'failed'
         : patch.playback === 'playing' && this.#state.autoplay === 'attempting'
           ? 'started'
-          : (patch.autoplay ?? this.#state.autoplay),
+          : acceptAutoplay
+            ? (patch.autoplay ?? this.#state.autoplay)
+            : this.#state.autoplay,
       error: this.#hasAutoplayConfigurationError
         ? this.#state.error?.category === 'configuration'
           ? this.#state.error
@@ -891,23 +905,32 @@ export class PlayerController {
     }
 
     const mode = this.#autoplayMode;
+    const revision = this.#autoplayConfigurationRevision;
     this.#autoplayAttemptGeneration = generation;
     this.#applyPatch({ autoplay: 'attempting' });
-    if (provider !== this.#provider || generation !== this.#generation) return;
-    void this.#attemptAutoplay(provider, generation, mode);
+    if (!this.#isCurrentAutoplayAttempt(provider, generation, revision, mode))
+      return;
+    void this.#attemptAutoplay(provider, generation, revision, mode);
   };
 
   #attemptAutoplay = async (
     provider: ProviderAdapter,
     generation: number,
+    revision: number,
     mode: Exclude<AutoplayMode, false>
   ): Promise<void> => {
     if (mode === 'muted') {
       const muteResult = await this.#providerCommand(provider, 'mute');
-      if (provider !== this.#provider || generation !== this.#generation)
+      if (!this.#isCurrentAutoplayAttempt(provider, generation, revision, mode))
         return;
       if (!muteResult.ok) {
-        this.#applyAutoplayFailure(muteResult, provider, generation);
+        this.#applyAutoplayFailure(
+          muteResult,
+          provider,
+          generation,
+          revision,
+          mode
+        );
         return;
       }
     }
@@ -917,23 +940,45 @@ export class PlayerController {
       generation,
       'autoplay'
     );
-    if (provider !== this.#provider || generation !== this.#generation) return;
+    if (!this.#isCurrentAutoplayAttempt(provider, generation, revision, mode))
+      return;
     if (!playResult.ok) {
-      this.#applyAutoplayFailure(playResult, provider, generation);
+      this.#applyAutoplayFailure(
+        playResult,
+        provider,
+        generation,
+        revision,
+        mode
+      );
     }
   };
 
   #applyAutoplayFailure = (
     result: Extract<CommandResult, { ok: false }>,
     provider: ProviderAdapter,
-    generation: number
+    generation: number,
+    revision: number,
+    mode: Exclude<AutoplayMode, false>
   ): void => {
-    if (provider !== this.#provider || generation !== this.#generation) return;
+    if (!this.#isCurrentAutoplayAttempt(provider, generation, revision, mode))
+      return;
     this.#applyPatch({
       autoplay: result.reason === 'blocked' ? 'blocked' : 'failed',
       error: result.error ?? null
     });
   };
+
+  #isCurrentAutoplayAttempt = (
+    provider: ProviderAdapter,
+    generation: number,
+    revision: number,
+    mode: Exclude<AutoplayMode, false>
+  ): boolean =>
+    provider === this.#provider &&
+    generation === this.#generation &&
+    revision === this.#autoplayConfigurationRevision &&
+    mode === this.#autoplayMode &&
+    !this.#hasAutoplayConfigurationError;
 
   #playWithOrigin = async (
     provider: ProviderAdapter,

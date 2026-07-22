@@ -60,6 +60,17 @@ const playEvent = {
   origin: 'provider'
 } as const;
 
+const deferred = <Value>() => {
+  let resolve: ((value: Value) => void) | undefined;
+  const promise = new Promise<Value>((next) => (resolve = next));
+  return {
+    promise,
+    resolve: (value: Value) => resolve?.(value)
+  };
+};
+
+const flushCommands = () => new Promise((resolve) => setTimeout(resolve, 0));
+
 test('does not attempt autoplay when it is disabled', () => {
   const mode: AutoplayMode = false;
   const fake = createProvider();
@@ -88,6 +99,109 @@ test('reports a recoverable configuration error for controlled unmuted autoplay'
     error: { category: 'configuration', fatal: false, recoverable: true }
   });
   expect(fake.getPlayCalls()).toBe(0);
+});
+
+test('ignores adversarial provider autoplay patches while disabled', () => {
+  const fake = createProvider();
+  const controller = new PlayerController();
+  controller.configureAutoplay(false);
+  controller.setProvider(fake.provider);
+
+  fake.emit({ autoplay: 'started' });
+  fake.emit({ autoplay: 'blocked', playback: 'playing' }, playEvent);
+
+  expect(controller.getState().autoplay).toBe('idle');
+});
+
+test('requires an attempting state and playing patch before autoplay starts', async () => {
+  const pendingPlay = deferred<CommandResult>();
+  const fake = createProvider({ play: () => pendingPlay.promise });
+  const controller = new PlayerController();
+  controller.configureAutoplay('audible');
+  controller.setProvider(fake.provider);
+
+  fake.emit({ autoplay: 'started' });
+  expect(controller.getState().autoplay).toBe('idle');
+
+  fake.emit({ lifecycle: 'ready', activation: 'ready' }, readyEvent);
+  await vi.waitFor(() => expect(fake.calls).toEqual(['play']));
+  fake.emit({ autoplay: 'started' });
+  expect(controller.getState().autoplay).toBe('attempting');
+
+  fake.emit({ autoplay: 'failed', playback: 'playing' }, playEvent);
+  expect(controller.getState().autoplay).toBe('started');
+  pendingPlay.resolve({ ok: true });
+});
+
+test('does not play after autoplay is disabled during deferred mute', async () => {
+  const pendingMute = deferred<CommandResult>();
+  const fake = createProvider({ mute: () => pendingMute.promise });
+  const controller = new PlayerController();
+  controller.configureAutoplay('muted');
+  controller.setProvider(fake.provider);
+  fake.emit({ lifecycle: 'ready', activation: 'ready' }, readyEvent);
+  await vi.waitFor(() => expect(fake.calls).toEqual(['mute']));
+
+  controller.configureAutoplay(false);
+  pendingMute.resolve({ ok: true });
+  await flushCommands();
+
+  expect(fake.calls).toEqual(['mute']);
+  expect(controller.getState().autoplay).toBe('idle');
+});
+
+test('rechecks autoplay configuration after attempting state publication', () => {
+  const fake = createProvider();
+  const controller = new PlayerController();
+  controller.configureAutoplay('audible');
+  controller.subscribe((state) => {
+    if (state.autoplay === 'attempting') controller.configureAutoplay(false);
+  });
+  controller.setProvider(fake.provider);
+
+  fake.emit({ lifecycle: 'ready', activation: 'ready' }, readyEvent);
+
+  expect(fake.calls).toEqual([]);
+  expect(controller.getState().autoplay).toBe('idle');
+});
+
+test('ignores a deferred play failure after autoplay is disabled', async () => {
+  const pendingPlay = deferred<CommandResult>();
+  const fake = createProvider({ play: () => pendingPlay.promise });
+  const controller = new PlayerController();
+  controller.configureAutoplay('audible');
+  controller.setProvider(fake.provider);
+  fake.emit({ lifecycle: 'ready', activation: 'ready' }, readyEvent);
+  await vi.waitFor(() => expect(fake.calls).toEqual(['play']));
+
+  controller.configureAutoplay(false);
+  pendingPlay.resolve({ ok: false, reason: 'blocked' });
+  await flushCommands();
+
+  expect(controller.getState().autoplay).toBe('idle');
+});
+
+test('invalidates deferred autoplay when a controlled mute conflict appears', async () => {
+  const pendingPlay = deferred<CommandResult>();
+  const fake = createProvider({ play: () => pendingPlay.promise });
+  const controller = new PlayerController();
+  const origins: PlayerEventOrigin[] = [];
+  controller.on('play', (event) => origins.push(event.origin));
+  controller.configureAutoplay('muted');
+  controller.setProvider(fake.provider);
+  fake.emit({ lifecycle: 'ready', activation: 'ready' }, readyEvent);
+  await vi.waitFor(() => expect(fake.calls).toEqual(['mute', 'play']));
+
+  controller.configureAutoplay('muted', { controlledMuted: false });
+  pendingPlay.resolve({ ok: true });
+  await flushCommands();
+  fake.emit({ playback: 'playing' }, playEvent);
+
+  expect(controller.getState()).toMatchObject({
+    autoplay: 'failed',
+    error: { category: 'configuration', fatal: false, recoverable: true }
+  });
+  expect(origins).toEqual(['provider']);
 });
 
 test('mutes before attempting muted autoplay and waits for confirmation', async () => {
