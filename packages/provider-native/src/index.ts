@@ -68,9 +68,23 @@ const mediaError = (media: HTMLVideoElement): PlayerError => {
   };
 };
 
+const errorString = (cause: unknown, property: 'message' | 'name') => {
+  if (
+    (typeof cause !== 'object' || cause === null) &&
+    typeof cause !== 'function'
+  ) {
+    return undefined;
+  }
+  try {
+    const value = Reflect.get(cause, property);
+    return typeof value === 'string' ? value : undefined;
+  } catch {
+    return undefined;
+  }
+};
+
 const commandError = (cause: unknown): Exclude<CommandResult, { ok: true }> => {
-  const blocked =
-    cause instanceof DOMException && cause.name === 'NotAllowedError';
+  const blocked = errorString(cause, 'name') === 'NotAllowedError';
   return {
     ok: false,
     reason: blocked ? 'blocked' : 'provider-error',
@@ -78,8 +92,7 @@ const commandError = (cause: unknown): Exclude<CommandResult, { ok: true }> => {
       category: blocked ? 'policy' : 'provider',
       fatal: false,
       recoverable: true,
-      message:
-        cause instanceof Error ? cause.message : 'The native command failed.',
+      message: errorString(cause, 'message') || 'The native command failed.',
       cause
     }
   };
@@ -479,7 +492,10 @@ export const createNativeProvider = (
         }
         return media.play();
       }),
-    pause: () => runCommand(() => media.pause()),
+    pause: () => {
+      ++replayGeneration;
+      return runCommand(() => media.pause());
+    },
     seekTo: (time) => {
       if (!Number.isFinite(time))
         return Promise.resolve({ ok: false, reason: 'provider-error' });
@@ -576,11 +592,13 @@ export const createNativeProvider = (
         return commandError(cause);
       }
     },
-    retry: () =>
-      runCommand(() => {
+    retry: () => {
+      ++replayGeneration;
+      return runCommand(() => {
         positioned = false;
         boundaryEnded = false;
         media.load();
-      })
+      });
+    }
   };
 };

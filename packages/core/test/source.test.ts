@@ -419,6 +419,91 @@ test('cleans a stale subscription when provider A subscribe installs B', () => {
   expect(bUnsubscribeCount).toBe(1);
 });
 
+test('stops outer setup when previous unsubscribe installs provider B', () => {
+  let previousDestroyCount = 0;
+  let targetSubscribeCount = 0;
+  let bUnsubscribeCount = 0;
+  const controller = new PlayerController();
+  const providerB = {
+    provider: 'vimeo' as const,
+    attach: () => undefined,
+    load: () => undefined,
+    destroy: () => undefined,
+    subscribe: () => () => {
+      bUnsubscribeCount += 1;
+    }
+  };
+  controller.setProvider({
+    provider: 'native',
+    attach: () => undefined,
+    load: () => undefined,
+    destroy: () => {
+      previousDestroyCount += 1;
+    },
+    subscribe: () => () => controller.setProvider(providerB)
+  });
+
+  controller.setProvider({
+    provider: 'hls',
+    attach: () => undefined,
+    load: () => undefined,
+    destroy: () => undefined,
+    subscribe: () => {
+      targetSubscribeCount += 1;
+      return () => undefined;
+    }
+  });
+
+  expect(controller.getState().provider).toBe('vimeo');
+  expect(previousDestroyCount).toBe(1);
+  expect(targetSubscribeCount).toBe(0);
+  controller.setProvider(undefined);
+  expect(bUnsubscribeCount).toBe(1);
+});
+
+test('does not recurse or continue outer setup when previous destroy installs B', () => {
+  let previousDestroyCount = 0;
+  let targetSubscribeCount = 0;
+  let bUnsubscribeCount = 0;
+  const controller = new PlayerController();
+  const providerB = {
+    provider: 'vimeo' as const,
+    attach: () => undefined,
+    load: () => undefined,
+    destroy: () => undefined,
+    subscribe: () => () => {
+      bUnsubscribeCount += 1;
+    }
+  };
+  controller.setProvider({
+    provider: 'native',
+    attach: () => undefined,
+    load: () => undefined,
+    destroy: () => {
+      previousDestroyCount += 1;
+      if (previousDestroyCount === 1) controller.setProvider(providerB);
+    },
+    subscribe: () => () => undefined
+  });
+
+  controller.setProvider({
+    provider: 'hls',
+    attach: () => undefined,
+    load: () => undefined,
+    destroy: () => undefined,
+    subscribe: () => {
+      targetSubscribeCount += 1;
+      return () => undefined;
+    }
+  });
+
+  expect(controller.getState().provider).toBe('vimeo');
+  expect(previousDestroyCount).toBe(1);
+  expect(targetSubscribeCount).toBe(0);
+  controller.setProvider(undefined);
+  expect(bUnsubscribeCount).toBe(1);
+});
+
 test('labels an A event with A when its patch subscriber installs B', () => {
   let emitA: ProviderStateListener | undefined;
   const events: Array<{ provider: string | null }> = [];

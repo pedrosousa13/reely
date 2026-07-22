@@ -1,5 +1,6 @@
 // @vitest-environment happy-dom
 
+import { runInNewContext } from 'node:vm';
 import { expect, test, vi } from 'vitest';
 import type { ProviderAdapter, ProviderStateListener } from '@reely/core';
 import { createNativeProvider } from '../src/index';
@@ -78,6 +79,27 @@ test('reports native command failures without throwing', async () => {
     ok: false,
     reason: 'blocked',
     error: { category: 'policy' }
+  });
+});
+
+test('classifies a foreign-realm NotAllowedError as blocked', async () => {
+  const media = document.createElement('video');
+  const provider = createNativeProvider(media);
+  const foreignError = runInNewContext(
+    `Object.assign(new Error('foreign playback blocked'), {
+      name: 'NotAllowedError'
+    })`
+  );
+  expect(foreignError).not.toBeInstanceOf(DOMException);
+  vi.spyOn(media, 'play').mockRejectedValue(foreignError);
+
+  await expect(provider.play()).resolves.toMatchObject({
+    ok: false,
+    reason: 'blocked',
+    error: {
+      category: 'policy',
+      message: 'foreign playback blocked'
+    }
   });
 });
 
@@ -275,6 +297,66 @@ test('cancels queued loop replay and pauses active media on destroy', async () =
 
   expect(play).not.toHaveBeenCalled();
   expect(pause).toHaveBeenCalledOnce();
+});
+
+test('cancels queued loop replay before explicit pause', async () => {
+  const media = document.createElement('video');
+  const play = vi.spyOn(media, 'play').mockResolvedValue(undefined);
+  const pause = vi.spyOn(media, 'pause');
+  const provider = createNativeProvider(media, { loop: true, endTime: 5 });
+  await provider.attach();
+  media.currentTime = 5;
+
+  media.dispatchEvent(new Event('timeupdate'));
+  await provider.pause();
+  await Promise.resolve();
+
+  expect(pause).toHaveBeenCalledOnce();
+  expect(play).not.toHaveBeenCalled();
+});
+
+test('cancels queued loop replay before explicit retry', async () => {
+  const media = document.createElement('video');
+  const play = vi.spyOn(media, 'play').mockResolvedValue(undefined);
+  const load = vi.spyOn(media, 'load');
+  const provider = createNativeProvider(media, { loop: true, endTime: 5 });
+  await provider.attach();
+  media.currentTime = 5;
+
+  media.dispatchEvent(new Event('timeupdate'));
+  await provider.retry();
+  await Promise.resolve();
+
+  expect(load).toHaveBeenCalledOnce();
+  expect(play).not.toHaveBeenCalled();
+});
+
+test('ignores a queued replay rejection after explicit pause cancels it', async () => {
+  const media = document.createElement('video');
+  let rejectPlay: ((cause: unknown) => void) | undefined;
+  vi.spyOn(media, 'play').mockReturnValue(
+    new Promise((_resolve, reject) => {
+      rejectPlay = reject;
+    })
+  );
+  vi.spyOn(media, 'pause');
+  const patches: Array<Record<string, unknown>> = [];
+  const provider = createNativeProvider(media, { loop: true, endTime: 5 });
+  provider.subscribe((patch) => patches.push(patch));
+  await provider.attach();
+  media.currentTime = 5;
+
+  media.dispatchEvent(new Event('timeupdate'));
+  await Promise.resolve();
+  await provider.pause();
+  patches.length = 0;
+  rejectPlay?.(new Error('canceled replay failed'));
+  await Promise.resolve();
+  await Promise.resolve();
+
+  expect(patches).not.toContainEqual(
+    expect.objectContaining({ error: expect.anything() })
+  );
 });
 
 test('restarts play from the configured start after reaching the end boundary', async () => {

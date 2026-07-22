@@ -540,10 +540,12 @@ export class PlayerController {
     const unsubscribe = this.#unsubscribe;
     const previousProvider = this.#provider;
     this.#unsubscribe = undefined;
+    this.#provider = undefined;
     unsubscribeSafely(unsubscribe);
     if (previousProvider) {
       destroyProviderSafely(previousProvider);
     }
+    if (generation !== this.#generation) return;
     this.#provider = provider;
     if (!provider) {
       this.#setState(createInitialPlayerState());
