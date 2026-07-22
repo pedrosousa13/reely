@@ -250,6 +250,130 @@ test('supersedes a delayed rate confirmation after a rapid controlled reversal',
   expect(setPlaybackRate.mock.calls).toEqual([[2], [1.25]]);
 });
 
+test('clears retired volume targets when queued confirmations coalesce to the latest value', () => {
+  const callbackMediaValues: number[] = [];
+  const onVolumeChange = vi.fn((value: number) => {
+    const media = screen.getByLabelText<HTMLVideoElement>('Reely media');
+    callbackMediaValues.push(media.volume);
+    expect(value).toBe(media.volume);
+  });
+  const handle = createRef<Player.PlayerHandle>();
+  const player = (volume: number) => (
+    <Player.Root
+      onVolumeChange={onVolumeChange}
+      ref={handle}
+      source="/tracer.mp4"
+      volume={volume}
+    >
+      <Player.Media />
+    </Player.Root>
+  );
+  const { rerender } = render(player(0.7));
+  const media = screen.getByLabelText<HTMLVideoElement>('Reely media');
+  const setVolume = vi.spyOn(handle.current!, 'setVolume');
+
+  rerender(player(0.2));
+  rerender(player(0.5));
+  fireEvent.volumeChange(media);
+  fireEvent.volumeChange(media);
+
+  media.volume = 0.2;
+  fireEvent.volumeChange(media);
+  expect(onVolumeChange).toHaveBeenCalledExactlyOnceWith(0.2);
+  expect(callbackMediaValues).toEqual([0.2]);
+  expect(media.volume).toBe(0.5);
+  fireEvent.volumeChange(media);
+  fireEvent.volumeChange(media);
+
+  expect(handle.current?.getState().volume).toBe(0.5);
+  expect(onVolumeChange).toHaveBeenCalledTimes(1);
+  expect(setVolume.mock.calls).toEqual([[0.2], [0.5], [0.5]]);
+});
+
+test('clears repeated retired rate targets after the latest active confirmation', () => {
+  const callbackMediaValues: number[] = [];
+  const onPlaybackRateChange = vi.fn((value: number) => {
+    const media = screen.getByLabelText<HTMLVideoElement>('Reely media');
+    callbackMediaValues.push(media.playbackRate);
+    expect(value).toBe(media.playbackRate);
+  });
+  const handle = createRef<Player.PlayerHandle>();
+  const player = (playbackRate: number) => (
+    <Player.Root
+      onPlaybackRateChange={onPlaybackRateChange}
+      playbackRate={playbackRate}
+      ref={handle}
+      source="/tracer.mp4"
+    >
+      <Player.Media />
+    </Player.Root>
+  );
+  const { rerender } = render(player(1));
+  const media = screen.getByLabelText<HTMLVideoElement>('Reely media');
+  const setPlaybackRate = vi.spyOn(handle.current!, 'setPlaybackRate');
+
+  rerender(player(2));
+  rerender(player(1));
+  rerender(player(2));
+  fireEvent.rateChange(media);
+  rerender(player(1.5));
+  fireEvent.rateChange(media);
+
+  media.playbackRate = 2;
+  fireEvent.rateChange(media);
+  expect(onPlaybackRateChange).toHaveBeenCalledExactlyOnceWith(2);
+  expect(callbackMediaValues).toEqual([2]);
+  expect(media.playbackRate).toBe(1.5);
+  fireEvent.rateChange(media);
+  fireEvent.rateChange(media);
+
+  expect(handle.current?.getState().playbackRate).toBe(1.5);
+  expect(onPlaybackRateChange).toHaveBeenCalledTimes(1);
+  expect(setPlaybackRate.mock.calls).toEqual([[2], [2], [1.5], [1.5]]);
+});
+
+test('clears retired muted targets when a reversal confirmation coalesces to current', () => {
+  const callbackMediaValues: boolean[] = [];
+  const onMutedChange = vi.fn((value: boolean) => {
+    const media = screen.getByLabelText<HTMLVideoElement>('Reely media');
+    callbackMediaValues.push(media.muted);
+    expect(value).toBe(media.muted);
+  });
+  const handle = createRef<Player.PlayerHandle>();
+  const player = (muted: boolean) => (
+    <Player.Root
+      muted={muted}
+      onMutedChange={onMutedChange}
+      ref={handle}
+      source="/tracer.mp4"
+    >
+      <Player.Media />
+    </Player.Root>
+  );
+  const { rerender } = render(player(false));
+  const media = screen.getByLabelText<HTMLVideoElement>('Reely media');
+  const mute = vi.spyOn(handle.current!, 'mute');
+  const unmute = vi.spyOn(handle.current!, 'unmute');
+
+  rerender(player(true));
+  rerender(player(false));
+  media.muted = false;
+  fireEvent.volumeChange(media);
+
+  media.muted = true;
+  fireEvent.volumeChange(media);
+  expect(onMutedChange).toHaveBeenCalledExactlyOnceWith(true);
+  expect(callbackMediaValues).toEqual([true]);
+  expect(media.muted).toBe(false);
+  fireEvent.volumeChange(media);
+  fireEvent.volumeChange(media);
+
+  expect(handle.current?.getState().muted).toBe(false);
+  expect(onMutedChange).toHaveBeenCalledTimes(1);
+  expect(mute).toHaveBeenCalledTimes(1);
+  expect(unmute).toHaveBeenCalledTimes(1);
+});
+
 test('reports confirmed controlled conflicts before restoring controlled values', () => {
   const mediaAtMutedCallback: boolean[] = [];
   const mediaAtVolumeCallback: number[] = [];

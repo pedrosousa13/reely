@@ -123,12 +123,13 @@ const takeSuperseded = <Value,>(
   reconciliations: Reconciliation<Value>[],
   confirmed: Value
 ): boolean => {
-  const index = reconciliations.findIndex(({ value }) =>
-    Object.is(value, confirmed)
-  );
-  if (index === -1) return false;
-  reconciliations.splice(index, 1);
-  return true;
+  let matched = false;
+  for (let index = reconciliations.length - 1; index >= 0; index -= 1) {
+    if (!Object.is(reconciliations[index]?.value, confirmed)) continue;
+    reconciliations.splice(index, 1);
+    matched = true;
+  }
+  return matched;
 };
 
 export const usePlayerState = <Selected,>(
@@ -312,15 +313,31 @@ export const Root = ({
       const confirmedVolume = event.detail.volume;
       const mutedRestoration = pendingMuted.current;
       const volumeRestoration = pendingVolume.current;
-      const mutedPropDriven =
-        mutedRestoration?.value === confirmedMuted ||
-        takeSuperseded(supersededMuted.current, confirmedMuted);
-      const volumePropDriven =
-        Object.is(volumeRestoration?.value, confirmedVolume) ||
-        takeSuperseded(supersededVolume.current, confirmedVolume);
+      const mutedRestorationMatches =
+        mutedRestoration?.value === confirmedMuted;
+      const mutedRetiredMatches = takeSuperseded(
+        supersededMuted.current,
+        confirmedMuted
+      );
+      const volumeRestorationMatches = Object.is(
+        volumeRestoration?.value,
+        confirmedVolume
+      );
+      const volumeRetiredMatches = takeSuperseded(
+        supersededVolume.current,
+        confirmedVolume
+      );
+      const mutedPropDriven = mutedRestorationMatches || mutedRetiredMatches;
+      const volumePropDriven = volumeRestorationMatches || volumeRetiredMatches;
 
       pendingMuted.current = undefined;
       pendingVolume.current = undefined;
+      if (controlledMuted.current === confirmedMuted) {
+        supersededMuted.current.length = 0;
+      }
+      if (Object.is(controlledVolume.current, confirmedVolume)) {
+        supersededVolume.current.length = 0;
+      }
       if (lastConfirmedMuted.current !== confirmedMuted) {
         lastConfirmedMuted.current = confirmedMuted;
         if (!mutedPropDriven) {
@@ -347,11 +364,17 @@ export const Root = ({
     const unsubscribeRate = controller.on('ratechange', (event) => {
       const confirmed = event.detail.playbackRate;
       const restoration = pendingPlaybackRate.current;
-      const propDriven =
-        Object.is(restoration?.value, confirmed) ||
-        takeSuperseded(supersededPlaybackRate.current, confirmed);
+      const restorationMatches = Object.is(restoration?.value, confirmed);
+      const retiredMatches = takeSuperseded(
+        supersededPlaybackRate.current,
+        confirmed
+      );
+      const propDriven = restorationMatches || retiredMatches;
 
       pendingPlaybackRate.current = undefined;
+      if (Object.is(controlledPlaybackRate.current, confirmed)) {
+        supersededPlaybackRate.current.length = 0;
+      }
       if (!Object.is(lastConfirmedPlaybackRate.current, confirmed)) {
         lastConfirmedPlaybackRate.current = confirmed;
         if (!propDriven) playbackRateChangeCallback.current?.(confirmed);
