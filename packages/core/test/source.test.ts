@@ -3,6 +3,7 @@
 import { expect, test } from 'vitest';
 import {
   PlayerController,
+  createInitialPlayerState,
   detectSource,
   type HlsSource,
   type ProviderStateListener,
@@ -448,6 +449,47 @@ test('contains subscribe failure and destroys the failed provider', async () => 
   await expect(controller.play()).resolves.toEqual({
     ok: false,
     reason: 'not-ready'
+  });
+});
+
+test('resets to the initial state when detaching after subscribe failure', () => {
+  const controller = new PlayerController();
+  controller.setProvider({
+    provider: 'native',
+    attach: () => undefined,
+    load: () => undefined,
+    destroy: () => undefined,
+    subscribe: () => {
+      throw new Error('subscribe failed');
+    }
+  });
+
+  controller.setProvider(undefined);
+
+  expect(controller.getState()).toEqual(createInitialPlayerState());
+});
+
+test('ignores a callback captured before subscribe failure', () => {
+  let emit: ProviderStateListener | undefined;
+  const controller = new PlayerController();
+  controller.setProvider({
+    provider: 'native',
+    attach: () => undefined,
+    load: () => undefined,
+    destroy: () => undefined,
+    subscribe: (listener) => {
+      emit = listener;
+      throw new Error('subscribe failed');
+    }
+  });
+
+  emit?.({ lifecycle: 'ready', activation: 'ready' });
+
+  expect(controller.getState()).toMatchObject({
+    lifecycle: 'error',
+    activation: 'error',
+    provider: 'native',
+    error: { message: 'subscribe failed' }
   });
 });
 

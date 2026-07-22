@@ -518,7 +518,16 @@ export class PlayerController {
   #generation = 0;
 
   setProvider = (provider: ProviderAdapter | undefined): void => {
-    if (provider === this.#provider) return;
+    const alreadyDetached =
+      this.#state.lifecycle === 'idle' &&
+      this.#state.activation === 'dormant' &&
+      this.#state.provider === null &&
+      this.#state.error === null;
+    if (
+      provider === this.#provider &&
+      (provider !== undefined || alreadyDetached)
+    )
+      return;
     const generation = ++this.#generation;
     const unsubscribe = this.#unsubscribe;
     const previousProvider = this.#provider;
@@ -552,7 +561,7 @@ export class PlayerController {
     } catch (cause) {
       this.#provider = undefined;
       destroyProviderSafely(provider);
-      this.#handleLifecycleFailure(cause, generation);
+      this.#handleLifecycleFailure(cause, ++this.#generation);
       return;
     }
     let attachResult: void | Promise<void>;
