@@ -219,6 +219,26 @@ test('caches an object selector and isolates it from unrelated state changes', (
   expect(renders).toBe(initialRenders);
 });
 
+test('reevaluates a changed selector when controller state is unchanged', () => {
+  const Selection = ({ selectPlayback }: { selectPlayback: boolean }) => {
+    const selected = Player.usePlayerState((state) =>
+      selectPlayback ? state.playback : state.volume
+    );
+    return <output>{selected}</output>;
+  };
+  const player = (selectPlayback: boolean) => (
+    <Player.Root source="/tracer.mp4">
+      <Selection selectPlayback={selectPlayback} />
+    </Player.Root>
+  );
+  const { rerender } = render(player(false));
+  expect(screen.getByText('1')).toBeDefined();
+
+  rerender(player(true));
+
+  expect(screen.getByText('paused')).toBeDefined();
+});
+
 test('throws a clear error when usePlayerActions is used outside Root', () => {
   const Probe = () => {
     Player.usePlayerActions();

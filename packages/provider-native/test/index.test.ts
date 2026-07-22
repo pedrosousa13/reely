@@ -174,6 +174,24 @@ test('ends playback at the configured end boundary without looping', async () =>
   );
 });
 
+test('keeps boundary-induced pause confirmation in ended state', async () => {
+  const media = document.createElement('video');
+  vi.spyOn(media, 'pause');
+  const patches: Array<{ playback?: string }> = [];
+  const provider = createNativeProvider(media, { endTime: 5 });
+  provider.subscribe((patch) => patches.push(patch));
+  await provider.attach();
+  patches.length = 0;
+  media.currentTime = 5;
+
+  media.dispatchEvent(new Event('timeupdate'));
+  media.dispatchEvent(new Event('pause'));
+
+  expect(patches.filter((patch) => patch.playback).at(-1)).toMatchObject({
+    playback: 'ended'
+  });
+});
+
 test('loops from the end boundary back to the configured start', async () => {
   const media = document.createElement('video');
   const play = vi.spyOn(media, 'play').mockResolvedValue(undefined);
@@ -222,6 +240,36 @@ test('restarts play from the configured start after reaching the end boundary', 
 
   expect(media.currentTime).toBe(2);
   expect(play).toHaveBeenCalledOnce();
+});
+
+test('restarts play from a nonzero start after natural media ended', async () => {
+  const media = document.createElement('video');
+  const play = vi.spyOn(media, 'play').mockResolvedValue(undefined);
+  const provider = createNativeProvider(media, { startTime: 2 });
+  await provider.attach();
+  media.currentTime = 8;
+  media.dispatchEvent(new Event('ended'));
+
+  await expect(provider.play?.()).resolves.toEqual({ ok: true });
+
+  expect(media.currentTime).toBe(2);
+  expect(play).toHaveBeenCalledOnce();
+});
+
+test('clamps seeking to seekable ranges intersected with configured boundaries', async () => {
+  const media = document.createElement('video');
+  Object.defineProperty(media, 'seekable', {
+    configurable: true,
+    value: createTimeRanges([
+      [0, 3],
+      [7, 10]
+    ])
+  });
+  const provider = createNativeProvider(media, { startTime: 4, endTime: 8 });
+
+  await expect(provider.seekTo?.(4)).resolves.toEqual({ ok: true });
+
+  expect(media.currentTime).toBe(7);
 });
 
 test('emits one public play event for the native play and playing pair', async () => {

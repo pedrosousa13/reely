@@ -102,6 +102,7 @@ export const usePlayerState = <Selected,>(
   const { controller } = usePlayer();
   const selectionRef = useRef<{
     initialized: boolean;
+    selector?: (state: PlayerState) => Selected;
     state?: PlayerState;
     value?: Selected;
   }>({ initialized: false });
@@ -109,7 +110,8 @@ export const usePlayerState = <Selected,>(
     const state = controller.getState();
     if (
       selectionRef.current.initialized &&
-      selectionRef.current.state === state
+      selectionRef.current.state === state &&
+      selectionRef.current.selector === selector
     ) {
       return selectionRef.current.value as Selected;
     }
@@ -118,10 +120,16 @@ export const usePlayerState = <Selected,>(
       selectionRef.current.initialized &&
       selectionsEqual(selectionRef.current.value, nextSelection)
     ) {
+      selectionRef.current.selector = selector;
       selectionRef.current.state = state;
       return selectionRef.current.value as Selected;
     }
-    selectionRef.current = { initialized: true, state, value: nextSelection };
+    selectionRef.current = {
+      initialized: true,
+      selector,
+      state,
+      value: nextSelection
+    };
     return nextSelection;
   }, [controller, selector]);
   return useSyncExternalStore(controller.subscribe, getSnapshot, getSnapshot);

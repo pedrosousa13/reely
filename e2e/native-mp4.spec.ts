@@ -16,9 +16,7 @@ test('plays, pauses, and ends an MP4 with confirmed native states', async ({
     'paused'
   );
 
-  await page.getByLabel('Reely media').evaluate((media) => {
-    media.dispatchEvent(new Event('ended'));
-  });
+  await page.getByRole('button', { name: 'Play' }).click();
   await expect(page.getByRole('button', { name: 'Play' })).toHaveAttribute(
     'data-playback-state',
     'ended'

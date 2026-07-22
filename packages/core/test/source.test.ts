@@ -421,6 +421,36 @@ test('contains synchronous unsubscribe, destroy, and attach failures', async () 
   });
 });
 
+test('contains subscribe failure and destroys the failed provider', async () => {
+  let destroyCount = 0;
+  const controller = new PlayerController();
+
+  expect(() =>
+    controller.setProvider({
+      provider: 'native',
+      attach: () => undefined,
+      load: () => undefined,
+      destroy: () => {
+        destroyCount += 1;
+      },
+      subscribe: () => {
+        throw new Error('subscribe failed');
+      }
+    })
+  ).not.toThrow();
+
+  expect(destroyCount).toBe(1);
+  expect(controller.getState()).toMatchObject({
+    lifecycle: 'error',
+    activation: 'error',
+    error: { message: 'subscribe failed' }
+  });
+  await expect(controller.play()).resolves.toEqual({
+    ok: false,
+    reason: 'not-ready'
+  });
+});
+
 test('contains rejected destroy and load failures without stale state', async () => {
   const controller = new PlayerController();
   controller.setProvider({
@@ -483,6 +513,98 @@ test('retry enters loading, clears the error, and accepts authoritative recovery
   expect(controller.getState()).toMatchObject({
     lifecycle: 'ready',
     error: null
+  });
+});
+
+test('ignores stale retry failure after a replacement provider is ready', async () => {
+  let resolveRetry:
+    | ((result: {
+        ok: false;
+        reason: 'provider-error';
+        error: {
+          category: 'provider';
+          fatal: false;
+          recoverable: true;
+          message: string;
+        };
+      }) => void)
+    | undefined;
+  let emitReplacement: ProviderStateListener | undefined;
+  const controller = new PlayerController();
+  controller.setProvider({
+    provider: 'native',
+    attach: () => undefined,
+    load: () => undefined,
+    destroy: () => undefined,
+    subscribe: () => () => undefined,
+    retry: () => new Promise((resolve) => (resolveRetry = resolve))
+  });
+  const retry = controller.retry();
+  controller.setProvider({
+    provider: 'native',
+    attach: () => undefined,
+    load: () => undefined,
+    destroy: () => undefined,
+    subscribe: (listener) => {
+      emitReplacement = listener;
+      return () => undefined;
+    }
+  });
+  emitReplacement?.({ lifecycle: 'ready', activation: 'ready' });
+
+  resolveRetry?.({
+    ok: false,
+    reason: 'provider-error',
+    error: {
+      category: 'provider',
+      fatal: false,
+      recoverable: true,
+      message: 'stale retry failed'
+    }
+  });
+  await retry;
+
+  expect(controller.getState()).toMatchObject({
+    lifecycle: 'ready',
+    activation: 'ready',
+    error: null
+  });
+});
+
+test('restores the prior coherent error state when retry fails without an error', async () => {
+  let emit: ProviderStateListener | undefined;
+  const controller = new PlayerController();
+  controller.setProvider({
+    provider: 'native',
+    attach: () => undefined,
+    load: () => undefined,
+    destroy: () => undefined,
+    subscribe: (listener) => {
+      emit = listener;
+      return () => undefined;
+    },
+    retry: async () => ({ ok: false, reason: 'unsupported' })
+  });
+  emit?.({
+    lifecycle: 'error',
+    activation: 'error',
+    error: {
+      category: 'network',
+      fatal: true,
+      recoverable: true,
+      message: 'original error'
+    }
+  });
+
+  await expect(controller.retry()).resolves.toEqual({
+    ok: false,
+    reason: 'unsupported'
+  });
+
+  expect(controller.getState()).toMatchObject({
+    lifecycle: 'error',
+    activation: 'error',
+    error: { message: 'original error' }
   });
 });
 

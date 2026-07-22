@@ -81,7 +81,7 @@ const withinMediaBounds = (
   time: number,
   startTime: number,
   endTime: number | undefined
-): number => {
+): number | undefined => {
   const duration = Number.isFinite(media.duration) ? media.duration : undefined;
   const effectiveEnd =
     endTime === undefined
@@ -96,14 +96,25 @@ const withinMediaBounds = (
     effectiveEnd === undefined ? time : Math.min(time, effectiveEnd)
   );
   if (media.seekable.length === 0) return bounded;
-  for (let index = 0; index < media.seekable.length; index += 1) {
-    const start = media.seekable.start(index);
-    const end = media.seekable.end(index);
+  const intersections = Array.from(
+    { length: media.seekable.length },
+    (_, index) => ({
+      start: Math.max(media.seekable.start(index), effectiveStart),
+      end: Math.min(
+        media.seekable.end(index),
+        effectiveEnd ?? Number.POSITIVE_INFINITY
+      )
+    })
+  ).filter(({ end, start }) => start <= end);
+  if (intersections.length === 0) return undefined;
+  for (const { end, start } of intersections) {
     if (bounded >= start && bounded <= end) return bounded;
   }
-  const start = media.seekable.start(0);
-  const end = media.seekable.end(media.seekable.length - 1);
-  return bounded < start ? start : end;
+  return intersections
+    .flatMap(({ end, start }) => [start, end])
+    .reduce((closest, point) =>
+      Math.abs(point - bounded) < Math.abs(closest - bounded) ? point : closest
+    );
 };
 
 export const createNativeProvider = (
@@ -191,12 +202,17 @@ export const createNativeProvider = (
       event('play', originalEvent, undefined)
     );
   const onPlaying = (): void => emit({ playback: 'playing', buffering: false });
-  const onPause = (originalEvent: Event): void =>
+  const onPause = (originalEvent: Event): void => {
+    if (boundaryEnded) return;
     emit({ playback: 'paused' }, event('pause', originalEvent, undefined));
+  };
+  const boundaryStart = (): number =>
+    withinMediaBounds(media, startTime, startTime, endTime) ?? startTime;
   const restartFromBoundary = (): void => {
     boundaryEnded = false;
-    media.currentTime = startTime;
-    emit({ currentTime: startTime, buffering: false });
+    const restartTime = boundaryStart();
+    media.currentTime = restartTime;
+    emit({ currentTime: restartTime, buffering: false });
     void Promise.resolve()
       .then(() => media.play())
       .catch(() => undefined);
@@ -216,7 +232,13 @@ export const createNativeProvider = (
   const applyInitialPosition = (): void => {
     if (positioned) return;
     positioned = true;
-    media.currentTime = withinMediaBounds(media, startTime, startTime, endTime);
+    const initialPosition = withinMediaBounds(
+      media,
+      startTime,
+      startTime,
+      endTime
+    );
+    if (initialPosition !== undefined) media.currentTime = initialPosition;
   };
   const onCanPlay = (originalEvent: Event): void => {
     emit({ buffering: false });
@@ -369,9 +391,12 @@ export const createNativeProvider = (
     },
     play: () =>
       runCommand(() => {
-        if (endTime !== undefined && media.currentTime >= endTime) {
+        if (
+          boundaryEnded ||
+          (endTime !== undefined && media.currentTime >= endTime)
+        ) {
           boundaryEnded = false;
-          media.currentTime = startTime;
+          media.currentTime = boundaryStart();
         }
         return media.play();
       }),
@@ -379,20 +404,26 @@ export const createNativeProvider = (
     seekTo: (time) => {
       if (!Number.isFinite(time))
         return Promise.resolve({ ok: false, reason: 'provider-error' });
+      const target = withinMediaBounds(media, time, startTime, endTime);
+      if (target === undefined)
+        return Promise.resolve({ ok: false, reason: 'provider-error' });
       return runCommand(() => {
-        media.currentTime = withinMediaBounds(media, time, startTime, endTime);
+        media.currentTime = target;
       });
     },
     seekBy: (offset) => {
       if (!Number.isFinite(offset))
         return Promise.resolve({ ok: false, reason: 'provider-error' });
+      const target = withinMediaBounds(
+        media,
+        media.currentTime + offset,
+        startTime,
+        endTime
+      );
+      if (target === undefined)
+        return Promise.resolve({ ok: false, reason: 'provider-error' });
       return runCommand(() => {
-        media.currentTime = withinMediaBounds(
-          media,
-          media.currentTime + offset,
-          startTime,
-          endTime
-        );
+        media.currentTime = target;
       });
     },
     mute: () =>

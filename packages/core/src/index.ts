@@ -272,6 +272,14 @@ const toProviderError = (cause: unknown): PlayerError =>
     cause
   });
 
+const destroyProviderSafely = (provider: ProviderAdapter): void => {
+  try {
+    void Promise.resolve(provider.destroy()).catch(() => undefined);
+  } catch {
+    // Provider cleanup must not escape the controller boundary.
+  }
+};
+
 export const parseSource = (source: string): ParsedSource => {
   if (!/\.mp4(?:$|[?#])/i.test(source)) {
     throw new Error(
@@ -521,11 +529,7 @@ export class PlayerController {
       // Provider cleanup must not escape the controller boundary.
     }
     if (previousProvider) {
-      try {
-        void Promise.resolve(previousProvider.destroy()).catch(() => undefined);
-      } catch {
-        // Provider cleanup must not escape the controller boundary.
-      }
+      destroyProviderSafely(previousProvider);
     }
     this.#provider = provider;
     if (!provider) {
@@ -539,11 +543,18 @@ export class PlayerController {
       activation: 'loading-provider',
       provider: provider.provider
     });
-    this.#unsubscribe = provider.subscribe((patch, event) => {
-      if (generation !== this.#generation) return;
-      this.#applyPatch(patch);
-      if (event) this.#emitEvent(event);
-    });
+    try {
+      this.#unsubscribe = provider.subscribe((patch, event) => {
+        if (generation !== this.#generation) return;
+        this.#applyPatch(patch);
+        if (event) this.#emitEvent(event);
+      });
+    } catch (cause) {
+      this.#provider = undefined;
+      destroyProviderSafely(provider);
+      this.#handleLifecycleFailure(cause, generation);
+      return;
+    }
     let attachResult: void | Promise<void>;
     try {
       attachResult = provider.attach();
@@ -608,18 +619,34 @@ export class PlayerController {
   exitPictureInPicture = (): Promise<CommandResult> =>
     this.#command('exitPictureInPicture');
   retry = (): Promise<CommandResult> => {
-    if (!this.#provider?.retry) return this.#command('retry');
+    const provider = this.#provider;
+    if (!provider?.retry) return this.#command('retry');
+    const generation = this.#generation;
+    const previousState = this.#state;
     this.#applyPatch({
       lifecycle: 'loading',
       activation: 'loading-provider',
       error: null
     });
     return this.#command('retry').then((result) => {
+      if (
+        this.#provider !== provider ||
+        this.#generation !== generation ||
+        this.#state.lifecycle !== 'loading'
+      ) {
+        return result;
+      }
       if (!result.ok && result.error) {
         this.#applyPatch({
           lifecycle: 'error',
           activation: 'error',
           error: result.error
+        });
+      } else if (!result.ok) {
+        this.#applyPatch({
+          lifecycle: previousState.lifecycle,
+          activation: previousState.activation,
+          error: previousState.error
         });
       }
       return result;
