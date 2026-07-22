@@ -11,6 +11,7 @@ import {
 } from '@reely/provider-native';
 import {
   createContext,
+  isValidElement,
   useCallback,
   useContext,
   useEffect,
@@ -19,7 +20,11 @@ import {
   useRef,
   useState,
   useSyncExternalStore,
+  type ComponentPropsWithoutRef,
+  type CSSProperties,
+  type ImgHTMLAttributes,
   type ReactNode,
+  type ReactElement,
   type Ref
 } from 'react';
 
@@ -27,6 +32,49 @@ type PlayerContextValue = {
   controller: PlayerController;
   source: ReturnType<typeof detectSource>;
   registerMedia: (media: HTMLVideoElement | null) => void;
+};
+
+export type ViewportProps = ComponentPropsWithoutRef<'div'>;
+
+export type PosterProps = ComponentPropsWithoutRef<'div'>;
+
+export type ResponsivePoster = {
+  readonly src: string;
+  readonly srcSet?: string;
+  readonly sizes?: string;
+  readonly width?: number | string;
+  readonly height?: number | string;
+  readonly loading?: ImgHTMLAttributes<HTMLImageElement>['loading'];
+  readonly fetchPriority?: ImgHTMLAttributes<HTMLImageElement>['fetchPriority'];
+  readonly decoding?: ImgHTMLAttributes<HTMLImageElement>['decoding'];
+  readonly objectFit?: CSSProperties['objectFit'];
+  readonly objectPosition?: CSSProperties['objectPosition'];
+};
+
+export type PosterInput = string | ResponsivePoster | ReactElement;
+
+export type NormalizedPoster =
+  | { readonly type: 'image'; readonly props: ResponsivePoster }
+  | { readonly type: 'custom'; readonly element: ReactElement };
+
+export type PosterImageProps = Omit<
+  ImgHTMLAttributes<HTMLImageElement>,
+  keyof ResponsivePoster
+> &
+  Partial<ResponsivePoster>;
+
+export type MediaProps = {
+  readonly nativePoster?: string;
+};
+
+export const normalizePoster = (input: PosterInput): NormalizedPoster => {
+  if (typeof input === 'string') {
+    return { type: 'image', props: { src: input } };
+  }
+  if (isValidElement(input)) {
+    return { type: 'custom', element: input };
+  }
+  return { type: 'image', props: { ...input } };
 };
 
 export type PlayerHandle = Pick<
@@ -71,6 +119,7 @@ export type RootProps = NativePlaybackOptions & {
 };
 
 const PlayerContext = createContext<PlayerContextValue | null>(null);
+const PosterContext = createContext<'visible' | 'hidden'>('visible');
 
 const usePlayer = (): PlayerContextValue => {
   const player = useContext(PlayerContext);
@@ -80,6 +129,8 @@ const usePlayer = (): PlayerContextValue => {
     );
   return player;
 };
+
+const usePosterState = (): 'visible' | 'hidden' => useContext(PosterContext);
 
 const selectionsEqual = (left: unknown, right: unknown): boolean => {
   if (Object.is(left, right)) return true;
@@ -215,7 +266,13 @@ export const Root = ({
   volume
 }: RootProps) => {
   const [controller] = useState(() => new PlayerController());
+  const [hiddenSourceKey, setHiddenSourceKey] = useState<string>();
   const currentMedia = useRef<HTMLVideoElement | null>(null);
+  const currentSourceKey = useRef<string | undefined>(undefined);
+  const providerSourceKey = useRef<string | undefined>(undefined);
+  const loadedDataListener = useRef<
+    { media: HTMLVideoElement; listener: () => void } | undefined
+  >(undefined);
   const desiredMuted = useRef(muted ?? defaultMuted);
   const desiredVolume = useRef(volume ?? defaultVolume);
   const desiredPlaybackRate = useRef(playbackRate ?? defaultPlaybackRate);
@@ -250,6 +307,11 @@ export const Root = ({
   const supersededPlaybackRate = useRef<Reconciliation<number>[]>([]);
   const preferenceUnsubscribe = useRef<(() => void) | undefined>(undefined);
   const detectedSource = useMemo(() => detectSource(source), [source]);
+  const sourceKeyForRender = sourceKey(detectedSource);
+
+  /* eslint-disable react-hooks/refs -- Provider callbacks need the current source before passive effects run. */
+  currentSourceKey.current = sourceKeyForRender;
+  /* eslint-enable react-hooks/refs */
 
   /* eslint-disable react-hooks/refs -- Provider callbacks need the current props before passive effects run. */
   controlledMuted.current = muted;
@@ -402,6 +464,14 @@ export const Root = ({
 
   const attachMedia = useCallback(
     (media: HTMLVideoElement | null) => {
+      const previousLoadedDataListener = loadedDataListener.current;
+      if (previousLoadedDataListener) {
+        previousLoadedDataListener.media.removeEventListener(
+          'loadeddata',
+          previousLoadedDataListener.listener
+        );
+        loadedDataListener.current = undefined;
+      }
       pendingMuted.current = undefined;
       pendingVolume.current = undefined;
       pendingPlaybackRate.current = undefined;
@@ -431,9 +501,21 @@ export const Root = ({
         controller.configureAutoplay(autoplayConfiguration.current.autoplay, {
           controlledMuted: autoplayConfiguration.current.muted
         });
+        const mediaSourceKey = currentSourceKey.current!;
+        const onLoadedData = () => {
+          if (
+            currentMedia.current === media &&
+            currentSourceKey.current === mediaSourceKey
+          ) {
+            setHiddenSourceKey(mediaSourceKey);
+          }
+        };
+        media.addEventListener('loadeddata', onLoadedData);
+        loadedDataListener.current = { media, listener: onLoadedData };
       }
       const options = nativePlaybackOptions.current;
       appliedNativePlaybackOptions.current = media ? options : undefined;
+      providerSourceKey.current = media ? currentSourceKey.current! : undefined;
       controller.setProvider(
         media ? createNativeProvider(media, options) : undefined
       );
@@ -456,9 +538,20 @@ export const Root = ({
 
   useEffect(() => {
     registerMedia(currentMedia.current);
+    const unsubscribePoster = controller.subscribe((state) => {
+      if (state.playback === 'playing' && providerSourceKey.current) {
+        setHiddenSourceKey(providerSourceKey.current);
+      }
+    });
     return () => {
+      unsubscribePoster();
       preferenceUnsubscribe.current?.();
       preferenceUnsubscribe.current = undefined;
+      const listener = loadedDataListener.current;
+      if (listener) {
+        listener.media.removeEventListener('loadeddata', listener.listener);
+        loadedDataListener.current = undefined;
+      }
       controller.setProvider(undefined);
     };
   }, [controller, registerMedia]);
@@ -552,14 +645,26 @@ export const Root = ({
     () => ({ controller, source: detectedSource, registerMedia }),
     [controller, detectedSource, registerMedia]
   );
+  const posterState =
+    hiddenSourceKey === sourceKeyForRender ? 'hidden' : 'visible';
 
   return (
-    <PlayerContext.Provider value={value}>{children}</PlayerContext.Provider>
+    <PlayerContext.Provider value={value}>
+      <PosterContext.Provider value={posterState}>
+        {children}
+      </PosterContext.Provider>
+    </PlayerContext.Provider>
   );
 };
 
-export const Viewport = ({ children }: { children: ReactNode }) => (
-  <div>{children}</div>
+export const Viewport = ({ children, style, ...rest }: ViewportProps) => (
+  <div
+    {...rest}
+    data-reely-part="viewport"
+    style={{ ...style, position: 'relative', overflow: 'hidden' }}
+  >
+    {children}
+  </div>
 );
 
 const sourceKey = (source: ReturnType<typeof detectSource>): string =>
@@ -567,7 +672,7 @@ const sourceKey = (source: ReturnType<typeof detectSource>): string =>
     ? JSON.stringify(source.source)
     : 'unsupported-source';
 
-export const Media = () => {
+export const Media = ({ nativePoster }: MediaProps) => {
   const { registerMedia, source } = usePlayer();
   if (source.status === 'failure' || source.source.type !== 'video') {
     return null;
@@ -576,16 +681,132 @@ export const Media = () => {
   return (
     <video
       aria-label="Reely media"
+      data-reely-part="media"
       key={sourceKey(source)}
+      poster={nativePoster}
       playsInline
       preload="metadata"
       ref={registerMedia}
+      style={{ position: 'relative', zIndex: 0 }}
     >
       {source.source.sources.map(({ mimeType, src }, index) => (
         <source key={`${src}:${mimeType}:${index}`} src={src} type={mimeType} />
       ))}
     </video>
   );
+};
+
+export const Poster = ({ children, style, ...safeRest }: PosterProps) => {
+  const posterState = usePosterState();
+
+  return (
+    <div
+      {...safeRest}
+      aria-hidden="true"
+      data-reely-part="poster"
+      data-state={posterState}
+      style={{
+        ...style,
+        position: 'absolute',
+        inset: 0,
+        width: '100%',
+        height: '100%',
+        zIndex: 10,
+        pointerEvents: 'none',
+        visibility: posterState === 'hidden' ? 'hidden' : 'visible'
+      }}
+    >
+      {children}
+    </div>
+  );
+};
+
+type PosterImageState = 'idle' | 'loading' | 'loaded' | 'error';
+
+const posterRequestKey = ({ src, srcSet, sizes }: PosterImageProps): string =>
+  `${src ?? ''}\u0000${srcSet ?? ''}\u0000${sizes ?? ''}`;
+
+const initialPosterImageState = (
+  src?: string,
+  srcSet?: string
+): PosterImageState => (src || srcSet ? 'loading' : 'idle');
+
+export const PosterImage = ({
+  src,
+  srcSet,
+  sizes,
+  width,
+  height,
+  loading,
+  fetchPriority,
+  decoding,
+  objectFit,
+  objectPosition,
+  onLoad,
+  onError,
+  style,
+  ...safeRest
+}: PosterImageProps) => {
+  const requestKey = posterRequestKey({ src, srcSet, sizes });
+  const state = useRef<{
+    key: string;
+    state: PosterImageState;
+  }>({
+    key: requestKey,
+    state: initialPosterImageState(src, srcSet)
+  });
+  const [, rerender] = useState(0);
+  /* eslint-disable react-hooks/refs -- The request signature must reset visible state during this render. */
+  if (state.current.key !== requestKey) {
+    state.current = {
+      key: requestKey,
+      state: initialPosterImageState(src, srcSet)
+    };
+  }
+  const posterImageState = state.current.state;
+  /* eslint-enable react-hooks/refs */
+
+  const updateState = (nextState: PosterImageState) => {
+    if (state.current.key !== requestKey) return;
+    state.current = { key: requestKey, state: nextState };
+    rerender((value) => value + 1);
+  };
+
+  /* eslint-disable react-hooks/refs -- posterImageState is the synchronous keyed-state snapshot above. */
+  return (
+    <img
+      {...safeRest}
+      alt=""
+      data-reely-part="poster-image"
+      data-state={posterImageState}
+      decoding={decoding}
+      fetchPriority={fetchPriority}
+      height={height}
+      loading={loading}
+      onError={(event) => {
+        updateState('error');
+        onError?.(event);
+      }}
+      onLoad={(event) => {
+        updateState('loaded');
+        onLoad?.(event);
+      }}
+      sizes={sizes}
+      src={src}
+      srcSet={srcSet}
+      style={{
+        ...style,
+        display: 'block',
+        width: '100%',
+        height: '100%',
+        objectFit: (objectFit ??
+          'var(--reely-poster-fit, cover)') as CSSProperties['objectFit'],
+        objectPosition: objectPosition ?? 'var(--reely-poster-position, center)'
+      }}
+      width={width}
+    />
+  );
+  /* eslint-enable react-hooks/refs */
 };
 
 export const PlayButton = () => {
