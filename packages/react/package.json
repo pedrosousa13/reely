@@ -19,6 +19,10 @@
     "react": ">=19 <20",
     "react-dom": ">=19 <20"
   },
+  "devDependencies": {
+    "react": "19.2.8",
+    "react-dom": "19.2.8"
+  },
   "scripts": {
     "build": "vite build && tsc -b"
   }

@@ -92,7 +92,7 @@ export const PlayButton = () => {
   const isPlaying = state === 'playing';
   const toggle = (): void => {
     if (isPlaying) controller.pause();
-    else void controller.play();
+    else void controller.play().catch(() => undefined);
   };
 
   return (

@@ -5,8 +5,10 @@ export default defineConfig({
   timeout: 10_000,
   use: { baseURL: 'http://127.0.0.1:4173' },
   webServer: {
-    command: './node_modules/.bin/vite apps/docs --host 127.0.0.1 --port 4173',
+    command:
+      './node_modules/.bin/vite preview apps/docs --host 127.0.0.1 --port 4173 --strictPort',
     url: 'http://127.0.0.1:4173',
+    gracefulShutdown: { signal: 'SIGTERM', timeout: 500 },
     reuseExistingServer: !process.env.CI
   },
   projects: [
