@@ -1,0 +1,44 @@
+import { expect, test } from '@playwright/test';
+
+test('muted autoplay reaches a confirmed started state', async ({ page }) => {
+  await page.goto('/?autoplay=muted');
+
+  const button = page.getByRole('button');
+  await expect(button).toHaveAttribute('data-autoplay-state', 'started');
+  await expect(page.getByLabel('Reely media')).toHaveJSProperty('muted', true);
+});
+
+test('blocked audible autoplay waits for a user retry without muting', async ({
+  page
+}) => {
+  await page.addInitScript(() => {
+    const nativePlay = HTMLMediaElement.prototype.play;
+    let firstPlay = true;
+    HTMLMediaElement.prototype.play = function () {
+      if (firstPlay) {
+        firstPlay = false;
+        return Promise.reject(
+          new DOMException(
+            'Autoplay is blocked for this test.',
+            'NotAllowedError'
+          )
+        );
+      }
+      return nativePlay.call(this);
+    };
+  });
+  await page.goto('/?autoplay=audible');
+
+  const playButton = page.getByRole('button', { name: 'Play' });
+  await expect(playButton).toHaveAttribute('data-autoplay-state', 'blocked');
+  await expect(playButton).toHaveJSProperty('tabIndex', 0);
+  await expect(page.getByLabel('Reely media')).toHaveJSProperty('muted', false);
+
+  await playButton.click();
+
+  await expect(page.getByRole('button', { name: 'Pause' })).toHaveAttribute(
+    'data-playback-state',
+    'playing'
+  );
+  await expect(page.getByLabel('Reely media')).toHaveJSProperty('muted', false);
+});

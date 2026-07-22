@@ -1,6 +1,7 @@
 import {
   PlayerController,
   detectSource,
+  type AutoplayMode,
   type PlayerSource,
   type PlayerState
 } from '@reely/core';
@@ -52,6 +53,22 @@ export type PlayerHandle = Pick<
 >;
 
 export type PlayerActions = Omit<PlayerHandle, 'getState' | 'subscribe' | 'on'>;
+
+export type RootProps = NativePlaybackOptions & {
+  readonly autoplay?: AutoplayMode;
+  readonly children: ReactNode;
+  readonly defaultMuted?: boolean;
+  readonly defaultPlaybackRate?: number;
+  readonly defaultVolume?: number;
+  readonly muted?: boolean;
+  readonly onMutedChange?: (muted: boolean) => void;
+  readonly onPlaybackRateChange?: (playbackRate: number) => void;
+  readonly onVolumeChange?: (volume: number) => void;
+  readonly playbackRate?: number;
+  readonly ref?: Ref<PlayerHandle>;
+  readonly source: PlayerSource;
+  readonly volume?: number;
+};
 
 const PlayerContext = createContext<PlayerContextValue | null>(null);
 
@@ -165,36 +182,245 @@ export const usePlayerActions = (): PlayerActions => {
 };
 
 export const Root = ({
+  autoplay = false,
   children,
+  defaultMuted = false,
+  defaultPlaybackRate = 1,
+  defaultVolume = 1,
   endTime,
   loop,
+  muted,
+  onMutedChange,
+  onPlaybackRateChange,
+  onVolumeChange,
+  playbackRate,
   ref,
   source,
-  startTime
-}: NativePlaybackOptions & {
-  children: ReactNode;
-  ref?: Ref<PlayerHandle>;
-  source: PlayerSource;
-}) => {
+  startTime,
+  volume
+}: RootProps) => {
   const [controller] = useState(() => new PlayerController());
   const currentMedia = useRef<HTMLVideoElement | null>(null);
+  const desiredMuted = useRef(muted ?? defaultMuted);
+  const desiredVolume = useRef(volume ?? defaultVolume);
+  const desiredPlaybackRate = useRef(playbackRate ?? defaultPlaybackRate);
+  const lastConfirmedMuted = useRef(muted ?? defaultMuted);
+  const lastConfirmedVolume = useRef(volume ?? defaultVolume);
+  const lastConfirmedPlaybackRate = useRef(playbackRate ?? defaultPlaybackRate);
+  const controlledMuted = useRef(muted);
+  const controlledVolume = useRef(volume);
+  const controlledPlaybackRate = useRef(playbackRate);
+  const wasMutedControlled = useRef(muted !== undefined);
+  const wasVolumeControlled = useRef(volume !== undefined);
+  const wasPlaybackRateControlled = useRef(playbackRate !== undefined);
+  const mutedChangeCallback = useRef(onMutedChange);
+  const volumeChangeCallback = useRef(onVolumeChange);
+  const playbackRateChangeCallback = useRef(onPlaybackRateChange);
+  const autoplayConfiguration = useRef({ autoplay, muted });
+  const pendingMuted = useRef<{ value: boolean } | undefined>(undefined);
+  const pendingVolume = useRef<{ value: number } | undefined>(undefined);
+  const pendingPlaybackRate = useRef<{ value: number } | undefined>(undefined);
+  const preferenceUnsubscribe = useRef<(() => void) | undefined>(undefined);
   const detectedSource = useMemo(() => detectSource(source), [source]);
 
+  /* eslint-disable react-hooks/refs -- Provider callbacks need the current props before passive effects run. */
+  controlledMuted.current = muted;
+  controlledVolume.current = volume;
+  controlledPlaybackRate.current = playbackRate;
+  mutedChangeCallback.current = onMutedChange;
+  volumeChangeCallback.current = onVolumeChange;
+  playbackRateChangeCallback.current = onPlaybackRateChange;
+  autoplayConfiguration.current = { autoplay, muted };
+  /* eslint-enable react-hooks/refs */
+
   useImperativeHandle(ref, () => controller, [controller]);
-  useEffect(() => () => controller.setProvider(undefined), [controller]);
+
+  const reconcileMuted = useCallback(
+    (value: boolean) => {
+      if (pendingMuted.current?.value === value) return;
+      const pending = { value };
+      pendingMuted.current = pending;
+      void (value ? controller.mute() : controller.unmute()).then((result) => {
+        if (!result.ok && pendingMuted.current === pending) {
+          pendingMuted.current = undefined;
+        }
+      });
+    },
+    [controller]
+  );
+
+  const reconcileVolume = useCallback(
+    (value: number) => {
+      if (Object.is(pendingVolume.current?.value, value)) return;
+      const pending = { value };
+      pendingVolume.current = pending;
+      void controller.setVolume(value).then((result) => {
+        if (!result.ok && pendingVolume.current === pending) {
+          pendingVolume.current = undefined;
+        }
+      });
+    },
+    [controller]
+  );
+
+  const reconcilePlaybackRate = useCallback(
+    (value: number) => {
+      if (Object.is(pendingPlaybackRate.current?.value, value)) return;
+      const pending = { value };
+      pendingPlaybackRate.current = pending;
+      void controller.setPlaybackRate(value).then((result) => {
+        if (!result.ok && pendingPlaybackRate.current === pending) {
+          pendingPlaybackRate.current = undefined;
+        }
+      });
+    },
+    [controller]
+  );
+
+  const ensurePreferenceSubscription = useCallback(() => {
+    if (preferenceUnsubscribe.current) return;
+    const unsubscribeVolume = controller.on('volumechange', (event) => {
+      const confirmedMuted = event.detail.muted;
+      const confirmedVolume = event.detail.volume;
+      const mutedRestoration = pendingMuted.current;
+      const volumeRestoration = pendingVolume.current;
+
+      pendingMuted.current = undefined;
+      pendingVolume.current = undefined;
+      if (mutedRestoration?.value === confirmedMuted) {
+        lastConfirmedMuted.current = confirmedMuted;
+      } else {
+        if (lastConfirmedMuted.current !== confirmedMuted) {
+          lastConfirmedMuted.current = confirmedMuted;
+          mutedChangeCallback.current?.(confirmedMuted);
+        }
+        if (controlledMuted.current === undefined) {
+          desiredMuted.current = confirmedMuted;
+        } else if (controlledMuted.current !== confirmedMuted) {
+          reconcileMuted(controlledMuted.current);
+        }
+      }
+      if (Object.is(volumeRestoration?.value, confirmedVolume)) {
+        lastConfirmedVolume.current = confirmedVolume;
+      } else {
+        if (!Object.is(lastConfirmedVolume.current, confirmedVolume)) {
+          lastConfirmedVolume.current = confirmedVolume;
+          volumeChangeCallback.current?.(confirmedVolume);
+        }
+        if (controlledVolume.current === undefined) {
+          desiredVolume.current = confirmedVolume;
+        } else if (!Object.is(controlledVolume.current, confirmedVolume)) {
+          reconcileVolume(controlledVolume.current);
+        }
+      }
+    });
+    const unsubscribeRate = controller.on('ratechange', (event) => {
+      const confirmed = event.detail.playbackRate;
+      const restoration = pendingPlaybackRate.current;
+
+      pendingPlaybackRate.current = undefined;
+      if (Object.is(restoration?.value, confirmed)) {
+        lastConfirmedPlaybackRate.current = confirmed;
+        return;
+      }
+      if (!Object.is(lastConfirmedPlaybackRate.current, confirmed)) {
+        lastConfirmedPlaybackRate.current = confirmed;
+        playbackRateChangeCallback.current?.(confirmed);
+      }
+      if (controlledPlaybackRate.current === undefined) {
+        desiredPlaybackRate.current = confirmed;
+      } else if (!Object.is(controlledPlaybackRate.current, confirmed)) {
+        reconcilePlaybackRate(controlledPlaybackRate.current);
+      }
+    });
+    preferenceUnsubscribe.current = () => {
+      unsubscribeVolume();
+      unsubscribeRate();
+    };
+  }, [controller, reconcileMuted, reconcilePlaybackRate, reconcileVolume]);
+
+  useEffect(
+    () => () => {
+      preferenceUnsubscribe.current?.();
+      controller.setProvider(undefined);
+    },
+    [controller]
+  );
 
   const registerMedia = useCallback(
     (media: HTMLVideoElement | null) => {
       if (currentMedia.current === media) return;
       currentMedia.current = media;
+      pendingMuted.current = undefined;
+      pendingVolume.current = undefined;
+      pendingPlaybackRate.current = undefined;
+      if (media) {
+        media.muted = controlledMuted.current ?? desiredMuted.current;
+        media.volume = controlledVolume.current ?? desiredVolume.current;
+        media.playbackRate =
+          controlledPlaybackRate.current ?? desiredPlaybackRate.current;
+        ensurePreferenceSubscription();
+        controller.configureAutoplay(autoplayConfiguration.current.autoplay, {
+          controlledMuted: autoplayConfiguration.current.muted
+        });
+      }
       controller.setProvider(
         media
           ? createNativeProvider(media, { endTime, loop, startTime })
           : undefined
       );
     },
-    [controller, endTime, loop, startTime]
+    [controller, endTime, ensurePreferenceSubscription, loop, startTime]
   );
+
+  useEffect(() => {
+    controller.configureAutoplay(autoplay, { controlledMuted: muted });
+  }, [autoplay, controller, muted]);
+
+  useEffect(() => {
+    if (muted === undefined) {
+      pendingMuted.current = undefined;
+      if (wasMutedControlled.current) {
+        desiredMuted.current = controller.getState().muted;
+      }
+      wasMutedControlled.current = false;
+    } else if (controller.getState().muted !== muted) {
+      wasMutedControlled.current = true;
+      reconcileMuted(muted);
+    } else {
+      wasMutedControlled.current = true;
+    }
+  }, [controller, muted, reconcileMuted]);
+
+  useEffect(() => {
+    if (volume === undefined) {
+      pendingVolume.current = undefined;
+      if (wasVolumeControlled.current) {
+        desiredVolume.current = controller.getState().volume;
+      }
+      wasVolumeControlled.current = false;
+    } else if (!Object.is(controller.getState().volume, volume)) {
+      wasVolumeControlled.current = true;
+      reconcileVolume(volume);
+    } else {
+      wasVolumeControlled.current = true;
+    }
+  }, [controller, reconcileVolume, volume]);
+
+  useEffect(() => {
+    if (playbackRate === undefined) {
+      pendingPlaybackRate.current = undefined;
+      if (wasPlaybackRateControlled.current) {
+        desiredPlaybackRate.current = controller.getState().playbackRate;
+      }
+      wasPlaybackRateControlled.current = false;
+    } else if (!Object.is(controller.getState().playbackRate, playbackRate)) {
+      wasPlaybackRateControlled.current = true;
+      reconcilePlaybackRate(playbackRate);
+    } else {
+      wasPlaybackRateControlled.current = true;
+    }
+  }, [controller, playbackRate, reconcilePlaybackRate]);
 
   const value = useMemo(
     () => ({ controller, source: detectedSource, registerMedia }),
@@ -237,15 +463,19 @@ export const Media = () => {
 };
 
 export const PlayButton = () => {
-  const playback = usePlayerState((state) => state.playback);
-  const { togglePlayback } = usePlayerActions();
+  const { autoplay, playback } = usePlayerState((state) => ({
+    autoplay: state.autoplay,
+    playback: state.playback
+  }));
+  const { controller } = usePlayer();
   const isPlaying = playback === 'playing';
 
   return (
     <button
       aria-label={isPlaying ? 'Pause' : 'Play'}
+      data-autoplay-state={autoplay}
       data-playback-state={playback}
-      onClick={() => void togglePlayback()}
+      onClick={() => void controller.togglePlaybackWithOrigin('user')}
       type="button"
     >
       {isPlaying ? 'Pause' : 'Play'}
