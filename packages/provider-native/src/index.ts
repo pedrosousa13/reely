@@ -23,6 +23,26 @@ export type NativePlaybackOptions = {
   readonly endTime?: number;
 };
 
+type NativeCommand =
+  | 'play'
+  | 'pause'
+  | 'seekTo'
+  | 'seekBy'
+  | 'mute'
+  | 'unmute'
+  | 'setVolume'
+  | 'setPlaybackRate'
+  | 'requestFullscreen'
+  | 'exitFullscreen'
+  | 'requestPictureInPicture'
+  | 'exitPictureInPicture'
+  | 'retry';
+
+export type NativeProviderAdapter = ProviderAdapter &
+  Required<Pick<ProviderAdapter, NativeCommand>> & {
+    readonly provider: 'native';
+  };
+
 const toRanges = (ranges: globalThis.TimeRanges): ReadonlyArray<TimeRange> =>
   Array.from({ length: ranges.length }, (_, index) => ({
     start: ranges.start(index),
@@ -120,8 +140,9 @@ const withinMediaBounds = (
 export const createNativeProvider = (
   media: HTMLVideoElement,
   options: NativePlaybackOptions = {}
-): ProviderAdapter => {
+): NativeProviderAdapter => {
   const listeners = new Set<ProviderStateListener>();
+  const ownerDocument = media.ownerDocument;
   const startTime =
     Number.isFinite(options.startTime) && (options.startTime ?? 0) > 0
       ? (options.startTime ?? 0)
@@ -136,6 +157,8 @@ export const createNativeProvider = (
   let loaded = false;
   let positioned = false;
   let boundaryEnded = false;
+  let seekingFromEnded = false;
+  let replayGeneration = 0;
 
   const emit = (
     patch: Parameters<ProviderStateListener>[0],
@@ -192,7 +215,9 @@ export const createNativeProvider = (
       originalEvent ? event('ready', originalEvent, undefined) : undefined
     );
 
-  const onPlay = (originalEvent: Event): void =>
+  const onPlay = (originalEvent: Event): void => {
+    boundaryEnded = false;
+    seekingFromEnded = false;
     emit(
       {
         playback: 'playing',
@@ -201,6 +226,7 @@ export const createNativeProvider = (
       },
       event('play', originalEvent, undefined)
     );
+  };
   const onPlaying = (): void => emit({ playback: 'playing', buffering: false });
   const onPause = (originalEvent: Event): void => {
     if (boundaryEnded) return;
@@ -208,14 +234,41 @@ export const createNativeProvider = (
   };
   const boundaryStart = (): number =>
     withinMediaBounds(media, startTime, startTime, endTime) ?? startTime;
+  const beforeEffectiveEnd = (time: number): boolean => {
+    const duration = Number.isFinite(media.duration)
+      ? media.duration
+      : undefined;
+    const effectiveEnd =
+      endTime === undefined
+        ? duration
+        : duration === undefined
+          ? endTime
+          : Math.min(endTime, duration);
+    return effectiveEnd === undefined || time < effectiveEnd;
+  };
   const restartFromBoundary = (): void => {
     boundaryEnded = false;
+    seekingFromEnded = false;
     const restartTime = boundaryStart();
+    const generation = ++replayGeneration;
     media.currentTime = restartTime;
     emit({ currentTime: restartTime, buffering: false });
-    void Promise.resolve()
-      .then(() => media.play())
-      .catch(() => undefined);
+    void Promise.resolve().then(async () => {
+      if (destroyed || generation !== replayGeneration) return;
+      try {
+        await media.play();
+      } catch (cause) {
+        if (destroyed || generation !== replayGeneration) return;
+        boundaryEnded = true;
+        const failure = commandError(cause);
+        emit({
+          playback: 'ended',
+          buffering: false,
+          seeking: false,
+          error: failure.error
+        });
+      }
+    });
   };
   const onEnded = (originalEvent: Event): void => {
     if (loop) {
@@ -248,16 +301,24 @@ export const createNativeProvider = (
     applyInitialPosition();
     onCanPlay(originalEvent);
   };
-  const onSeeking = (originalEvent: Event): void =>
+  const onSeeking = (originalEvent: Event): void => {
+    if (boundaryEnded && beforeEffectiveEnd(media.currentTime)) {
+      boundaryEnded = false;
+      seekingFromEnded = true;
+    }
     emit(
       { seeking: true },
       event('seeking', originalEvent, { currentTime: media.currentTime })
     );
-  const onSeeked = (originalEvent: Event): void =>
+  };
+  const onSeeked = (originalEvent: Event): void => {
+    const playback = seekingFromEnded ? { playback: 'paused' as const } : {};
+    seekingFromEnded = false;
     emit(
-      { seeking: false, currentTime: media.currentTime },
+      { seeking: false, currentTime: media.currentTime, ...playback },
       event('seeked', originalEvent, { currentTime: media.currentTime })
     );
+  };
   const onTimeUpdate = (originalEvent: Event): void => {
     if (endTime !== undefined && media.currentTime >= endTime) {
       if (loop) {
@@ -299,24 +360,34 @@ export const createNativeProvider = (
       })
     );
   const onError = (originalEvent: Event): void => {
+    ++replayGeneration;
+    boundaryEnded = false;
+    seekingFromEnded = false;
     const error = mediaError(media);
     emit(
-      { lifecycle: 'error', activation: 'error', error },
+      {
+        lifecycle: 'error',
+        activation: 'error',
+        playback: 'paused',
+        buffering: false,
+        seeking: false,
+        error
+      },
       event('error', originalEvent, error)
     );
   };
   const onFullscreenChange = (originalEvent: Event): void =>
     emit(
-      { fullscreen: document.fullscreenElement === media },
+      { fullscreen: ownerDocument.fullscreenElement === media },
       event('fullscreenchange', originalEvent, {
-        fullscreen: document.fullscreenElement === media
+        fullscreen: ownerDocument.fullscreenElement === media
       })
     );
   const onPictureInPictureChange = (originalEvent: Event): void =>
     emit(
-      { pictureInPicture: document.pictureInPictureElement === media },
+      { pictureInPicture: ownerDocument.pictureInPictureElement === media },
       event('pictureinpicturechange', originalEvent, {
-        pictureInPicture: document.pictureInPictureElement === media
+        pictureInPicture: ownerDocument.pictureInPictureElement === media
       })
     );
 
@@ -335,7 +406,7 @@ export const createNativeProvider = (
     media.addEventListener('volumechange', onVolumeChange);
     media.addEventListener('ratechange', onRateChange);
     media.addEventListener('error', onError);
-    document.addEventListener('fullscreenchange', onFullscreenChange);
+    ownerDocument.addEventListener('fullscreenchange', onFullscreenChange);
     media.addEventListener('enterpictureinpicture', onPictureInPictureChange);
     media.addEventListener('leavepictureinpicture', onPictureInPictureChange);
   };
@@ -355,7 +426,7 @@ export const createNativeProvider = (
     media.removeEventListener('volumechange', onVolumeChange);
     media.removeEventListener('ratechange', onRateChange);
     media.removeEventListener('error', onError);
-    document.removeEventListener('fullscreenchange', onFullscreenChange);
+    ownerDocument.removeEventListener('fullscreenchange', onFullscreenChange);
     media.removeEventListener(
       'enterpictureinpicture',
       onPictureInPictureChange
@@ -382,7 +453,15 @@ export const createNativeProvider = (
     destroy: () => {
       if (destroyed) return;
       destroyed = true;
+      ++replayGeneration;
       if (attached) removeListeners();
+      if (!media.paused) {
+        try {
+          media.pause();
+        } catch {
+          // Teardown must not escape the provider boundary.
+        }
+      }
       listeners.clear();
     },
     subscribe: (listener) => {
@@ -408,6 +487,10 @@ export const createNativeProvider = (
       if (target === undefined)
         return Promise.resolve({ ok: false, reason: 'provider-error' });
       return runCommand(() => {
+        if (boundaryEnded && beforeEffectiveEnd(target)) {
+          boundaryEnded = false;
+          seekingFromEnded = true;
+        }
         media.currentTime = target;
       });
     },
@@ -423,6 +506,10 @@ export const createNativeProvider = (
       if (target === undefined)
         return Promise.resolve({ ok: false, reason: 'provider-error' });
       return runCommand(() => {
+        if (boundaryEnded && beforeEffectiveEnd(target)) {
+          boundaryEnded = false;
+          seekingFromEnded = true;
+        }
         media.currentTime = target;
       });
     },
@@ -458,9 +545,11 @@ export const createNativeProvider = (
       }
     },
     exitFullscreen: async () => {
-      if (!document.exitFullscreen) return { ok: false, reason: 'unsupported' };
+      if (ownerDocument.fullscreenElement !== media) return { ok: true };
+      if (!ownerDocument.exitFullscreen)
+        return { ok: false, reason: 'unsupported' };
       try {
-        await document.exitFullscreen();
+        await ownerDocument.exitFullscreen();
         return { ok: true };
       } catch (cause) {
         return commandError(cause);
@@ -477,10 +566,11 @@ export const createNativeProvider = (
       }
     },
     exitPictureInPicture: async () => {
-      if (!document.exitPictureInPicture)
+      if (ownerDocument.pictureInPictureElement !== media) return { ok: true };
+      if (!ownerDocument.exitPictureInPicture)
         return { ok: false, reason: 'unsupported' };
       try {
-        await document.exitPictureInPicture();
+        await ownerDocument.exitPictureInPicture();
         return { ok: true };
       } catch (cause) {
         return commandError(cause);

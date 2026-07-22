@@ -2,7 +2,10 @@
   "files": [],
   "references": [
     { "path": "./packages/core" },
+    { "path": "./packages/core/tsconfig.test.json" },
+    { "path": "./packages/core/tsconfig.no-dom.json" },
     { "path": "./packages/provider-native" },
+    { "path": "./packages/provider-native/tsconfig.test.json" },
     { "path": "./packages/react" },
     { "path": "./packages/react/tsconfig.test.json" },
     { "path": "./apps/docs" }

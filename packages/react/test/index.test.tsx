@@ -219,6 +219,28 @@ test('caches an object selector and isolates it from unrelated state changes', (
   expect(renders).toBe(initialRenders);
 });
 
+test('observes changes to enumerable symbol-key selector values', () => {
+  const volume = Symbol('volume');
+  const Volume = () => {
+    const selection = Player.usePlayerState((state) => ({
+      [volume]: state.volume
+    }));
+    return <output>{selection[volume]}</output>;
+  };
+  render(
+    <Player.Root source="/tracer.mp4">
+      <Player.Media />
+      <Volume />
+    </Player.Root>
+  );
+  const media = screen.getByLabelText<HTMLVideoElement>('Reely media');
+  media.volume = 0.4;
+
+  fireEvent.volumeChange(media);
+
+  expect(screen.getByText('0.4')).toBeDefined();
+});
+
 test('reevaluates a changed selector when controller state is unchanged', () => {
   const Selection = ({ selectPlayback }: { selectPlayback: boolean }) => {
     const selected = Player.usePlayerState((state) =>

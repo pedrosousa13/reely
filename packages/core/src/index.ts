@@ -100,7 +100,7 @@ export type PlayerEventFor<Type extends PlayerEventType> = {
   readonly origin: PlayerEventOrigin;
   readonly provider: PlayerProvider | null;
   readonly timestamp: number;
-  readonly originalEvent?: Event;
+  readonly originalEvent?: unknown;
 };
 
 export type PlayerEvent = {
@@ -275,6 +275,14 @@ const toProviderError = (cause: unknown): PlayerError =>
 const destroyProviderSafely = (provider: ProviderAdapter): void => {
   try {
     void Promise.resolve(provider.destroy()).catch(() => undefined);
+  } catch {
+    // Provider cleanup must not escape the controller boundary.
+  }
+};
+
+const unsubscribeSafely = (unsubscribe: (() => void) | undefined): void => {
+  try {
+    unsubscribe?.();
   } catch {
     // Provider cleanup must not escape the controller boundary.
   }
@@ -532,11 +540,7 @@ export class PlayerController {
     const unsubscribe = this.#unsubscribe;
     const previousProvider = this.#provider;
     this.#unsubscribe = undefined;
-    try {
-      unsubscribe?.();
-    } catch {
-      // Provider cleanup must not escape the controller boundary.
-    }
+    unsubscribeSafely(unsubscribe);
     if (previousProvider) {
       destroyProviderSafely(previousProvider);
     }
@@ -552,18 +556,31 @@ export class PlayerController {
       activation: 'loading-provider',
       provider: provider.provider
     });
+    if (generation !== this.#generation || provider !== this.#provider) return;
+    let nextUnsubscribe: (() => void) | undefined;
     try {
-      this.#unsubscribe = provider.subscribe((patch, event) => {
+      nextUnsubscribe = provider.subscribe((patch, event) => {
         if (generation !== this.#generation) return;
+        const originatingEvent = event
+          ? { ...event, provider: provider.provider }
+          : undefined;
         this.#applyPatch(patch);
-        if (event) this.#emitEvent(event);
+        if (originatingEvent) this.#emitEvent(originatingEvent);
       });
     } catch (cause) {
+      if (generation !== this.#generation || provider !== this.#provider) {
+        return;
+      }
       this.#provider = undefined;
       destroyProviderSafely(provider);
       this.#handleLifecycleFailure(cause, ++this.#generation);
       return;
     }
+    if (generation !== this.#generation || provider !== this.#provider) {
+      unsubscribeSafely(nextUnsubscribe);
+      return;
+    }
+    this.#unsubscribe = nextUnsubscribe;
     let attachResult: void | Promise<void>;
     try {
       attachResult = provider.attach();
@@ -637,7 +654,10 @@ export class PlayerController {
       activation: 'loading-provider',
       error: null
     });
-    return this.#command('retry').then((result) => {
+    if (this.#provider !== provider || this.#generation !== generation) {
+      return Promise.resolve({ ok: false, reason: 'not-ready' });
+    }
+    return this.#providerCommand(provider, 'retry').then((result) => {
       if (
         this.#provider !== provider ||
         this.#generation !== generation ||
@@ -684,11 +704,35 @@ export class PlayerController {
   ): Promise<CommandResult> => {
     const provider = this.#provider;
     if (!provider) return { ok: false, reason: 'not-ready' };
+    return this.#providerCommand(provider, name, value);
+  };
+
+  #providerCommand = async (
+    provider: ProviderAdapter,
+    name: keyof Pick<
+      ProviderAdapter,
+      | 'play'
+      | 'pause'
+      | 'seekTo'
+      | 'seekBy'
+      | 'mute'
+      | 'unmute'
+      | 'setVolume'
+      | 'setPlaybackRate'
+      | 'selectTextTrack'
+      | 'requestFullscreen'
+      | 'exitFullscreen'
+      | 'requestPictureInPicture'
+      | 'exitPictureInPicture'
+      | 'retry'
+    >,
+    value?: number | string | null
+  ): Promise<CommandResult> => {
     const command = provider[name] as
       ((value?: number | string | null) => Promise<CommandResult>) | undefined;
     if (!command) return { ok: false, reason: 'unsupported' };
     try {
-      return await command(value);
+      return await command.call(provider, value);
     } catch (cause) {
       return {
         ok: false,

@@ -230,6 +230,53 @@ test('loops a native ended event back to the configured start', async () => {
   );
 });
 
+test('reports an ended state when automatic loop replay is rejected', async () => {
+  const media = document.createElement('video');
+  vi.spyOn(media, 'play').mockRejectedValue(new Error('replay failed'));
+  const patches: Array<Record<string, unknown>> = [];
+  const provider = createNativeProvider(media, {
+    loop: true,
+    startTime: 2,
+    endTime: 5
+  });
+  provider.subscribe((patch) => patches.push(patch));
+  await provider.attach();
+  media.dispatchEvent(new Event('playing'));
+  patches.length = 0;
+  media.currentTime = 5;
+
+  media.dispatchEvent(new Event('timeupdate'));
+  await Promise.resolve();
+  await Promise.resolve();
+
+  expect(patches.at(-1)).toMatchObject({
+    playback: 'ended',
+    buffering: false,
+    seeking: false,
+    error: { message: 'replay failed' }
+  });
+});
+
+test('cancels queued loop replay and pauses active media on destroy', async () => {
+  const media = document.createElement('video');
+  Object.defineProperty(media, 'paused', {
+    configurable: true,
+    value: false
+  });
+  const play = vi.spyOn(media, 'play').mockResolvedValue(undefined);
+  const pause = vi.spyOn(media, 'pause');
+  const provider = createNativeProvider(media, { loop: true, endTime: 5 });
+  await provider.attach();
+  media.currentTime = 5;
+
+  media.dispatchEvent(new Event('timeupdate'));
+  await provider.destroy();
+  await Promise.resolve();
+
+  expect(play).not.toHaveBeenCalled();
+  expect(pause).toHaveBeenCalledOnce();
+});
+
 test('restarts play from the configured start after reaching the end boundary', async () => {
   const media = document.createElement('video');
   const play = vi.spyOn(media, 'play').mockResolvedValue(undefined);
@@ -254,6 +301,30 @@ test('restarts play from a nonzero start after natural media ended', async () =>
 
   expect(media.currentTime).toBe(2);
   expect(play).toHaveBeenCalledOnce();
+});
+
+test('retains a successful seek before play after playback ended', async () => {
+  const media = document.createElement('video');
+  vi.spyOn(media, 'play').mockResolvedValue(undefined);
+  const playbackPatches: string[] = [];
+  const provider = createNativeProvider(media, { startTime: 2, endTime: 8 });
+  provider.subscribe((patch) => {
+    if (patch.playback) playbackPatches.push(patch.playback);
+  });
+  await provider.attach();
+  media.currentTime = 8;
+  media.dispatchEvent(new Event('ended'));
+  playbackPatches.length = 0;
+
+  await expect(provider.seekTo(5)).resolves.toEqual({ ok: true });
+  await expect(provider.play()).resolves.toEqual({ ok: true });
+
+  expect(media.currentTime).toBe(5);
+  expect(playbackPatches).toEqual([]);
+  media.dispatchEvent(new Event('seeking'));
+  media.dispatchEvent(new Event('seeked'));
+  media.dispatchEvent(new Event('play'));
+  expect(playbackPatches).toEqual(['paused', 'playing']);
 });
 
 test('clamps seeking to seekable ranges intersected with configured boundaries', async () => {
@@ -405,6 +476,32 @@ test('reports waiting, recovery, ended, and source errors from media events', as
   );
 });
 
+test('clears active playback, buffering, and seeking on fatal media error', async () => {
+  const media = document.createElement('video');
+  const patches: Array<Record<string, unknown>> = [];
+  const provider = createNativeProvider(media);
+  provider.subscribe((patch) => patches.push(patch));
+  await provider.attach();
+  media.dispatchEvent(new Event('play'));
+  media.dispatchEvent(new Event('waiting'));
+  media.dispatchEvent(new Event('seeking'));
+  Object.defineProperty(media, 'error', {
+    configurable: true,
+    value: { code: 3, message: 'fatal decode' }
+  });
+
+  media.dispatchEvent(new Event('error'));
+
+  expect(patches.at(-1)).toMatchObject({
+    lifecycle: 'error',
+    activation: 'error',
+    playback: 'paused',
+    buffering: false,
+    seeking: false,
+    error: { fatal: true, message: 'fatal decode' }
+  });
+});
+
 test('attaches and destroys idempotently and unregisters native listeners', async () => {
   const media = document.createElement('video');
   const add = vi.spyOn(media, 'addEventListener');
@@ -442,6 +539,14 @@ test('reports and executes available fullscreen and picture-in-picture commands'
     configurable: true,
     value: exitPictureInPicture
   });
+  Object.defineProperty(document, 'fullscreenElement', {
+    configurable: true,
+    value: media
+  });
+  Object.defineProperty(document, 'pictureInPictureElement', {
+    configurable: true,
+    value: media
+  });
   const patches: Array<Record<string, unknown>> = [];
   const provider = createNativeProvider(media);
   provider.subscribe((patch) => patches.push(patch));
@@ -469,7 +574,53 @@ test('reports and executes available fullscreen and picture-in-picture commands'
   } finally {
     Reflect.deleteProperty(document, 'exitFullscreen');
     Reflect.deleteProperty(document, 'exitPictureInPicture');
+    Reflect.deleteProperty(document, 'fullscreenElement');
+    Reflect.deleteProperty(document, 'pictureInPictureElement');
   }
+});
+
+test('uses the owner document and exits only media-owned presentation state', async () => {
+  const ownerDocument = document.implementation.createHTMLDocument('owner');
+  const media = ownerDocument.createElement('video');
+  const otherMedia = ownerDocument.createElement('video');
+  const exitFullscreen = vi.fn().mockResolvedValue(undefined);
+  const exitPictureInPicture = vi.fn().mockResolvedValue(undefined);
+  Object.defineProperty(ownerDocument, 'exitFullscreen', {
+    configurable: true,
+    value: exitFullscreen
+  });
+  Object.defineProperty(ownerDocument, 'exitPictureInPicture', {
+    configurable: true,
+    value: exitPictureInPicture
+  });
+  Object.defineProperty(ownerDocument, 'fullscreenElement', {
+    configurable: true,
+    value: otherMedia
+  });
+  Object.defineProperty(ownerDocument, 'pictureInPictureElement', {
+    configurable: true,
+    value: otherMedia
+  });
+  const provider = createNativeProvider(media);
+
+  await expect(provider.exitFullscreen()).resolves.toEqual({ ok: true });
+  await expect(provider.exitPictureInPicture()).resolves.toEqual({ ok: true });
+  expect(exitFullscreen).not.toHaveBeenCalled();
+  expect(exitPictureInPicture).not.toHaveBeenCalled();
+
+  Object.defineProperty(ownerDocument, 'fullscreenElement', {
+    configurable: true,
+    value: media
+  });
+  Object.defineProperty(ownerDocument, 'pictureInPictureElement', {
+    configurable: true,
+    value: media
+  });
+
+  await expect(provider.exitFullscreen()).resolves.toEqual({ ok: true });
+  await expect(provider.exitPictureInPicture()).resolves.toEqual({ ok: true });
+  expect(exitFullscreen).toHaveBeenCalledOnce();
+  expect(exitPictureInPicture).toHaveBeenCalledOnce();
 });
 
 test('reports unsupported fullscreen and picture-in-picture browser APIs consistently', async () => {
