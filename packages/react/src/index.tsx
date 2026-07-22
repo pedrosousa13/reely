@@ -1,7 +1,7 @@
 import {
   PlayerController,
-  parseSource,
-  type ParsedSource,
+  detectSource,
+  type PlayerSource,
   type PlaybackState
 } from '@reely/core';
 import { createNativeProvider } from '@reely/provider-native';
@@ -18,7 +18,7 @@ import {
 
 type PlayerContextValue = {
   controller: PlayerController;
-  source: ParsedSource;
+  source: ReturnType<typeof detectSource>;
   registerMedia: (media: HTMLVideoElement | null) => void;
   state: PlaybackState;
 };
@@ -37,7 +37,7 @@ export const Root = ({
   source
 }: {
   children: ReactNode;
-  source: string;
+  source: PlayerSource;
 }) => {
   const [player] = useState(() => new PlayerController());
   const [state, setState] = useState<PlaybackState>(player.getState());
@@ -58,7 +58,7 @@ export const Root = ({
   const value = useMemo(
     () => ({
       controller: player,
-      source: parseSource(source),
+      source: detectSource(source),
       registerMedia,
       state
     }),
@@ -76,13 +76,17 @@ export const Viewport = ({ children }: { children: ReactNode }) => (
 
 export const Media = () => {
   const { registerMedia, source } = usePlayer();
+  if (source.status === 'failure' || source.source.type !== 'video') {
+    return null;
+  }
+
   return (
     <video
       aria-label="Reely media"
       playsInline
       preload="metadata"
       ref={registerMedia}
-      src={source.url}
+      src={source.source.sources[0]?.src}
     />
   );
 };

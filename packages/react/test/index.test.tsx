@@ -39,3 +39,20 @@ test('keeps confirmed paused state when the media play command rejects', async (
     process.off('unhandledRejection', onUnhandledRejection);
   }
 });
+
+test('accepts an explicit video source object', () => {
+  render(
+    <Player.Root
+      source={{
+        type: 'video',
+        sources: [{ src: '/tracer.webm', mimeType: 'video/webm' }]
+      }}
+    >
+      <Player.Media />
+    </Player.Root>
+  );
+
+  expect(screen.getByLabelText('Reely media').getAttribute('src')).toBe(
+    '/tracer.webm'
+  );
+});
