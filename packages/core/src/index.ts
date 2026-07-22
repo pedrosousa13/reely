@@ -572,8 +572,12 @@ export class PlayerController {
     this.#applyPatch({
       autoplay: this.#hasAutoplayConfigurationError ? 'failed' : 'idle',
       error: this.#hasAutoplayConfigurationError
-        ? autoplayConfigurationError()
-        : hadConfigurationError
+        ? this.#state.lifecycle === 'error' &&
+          this.#state.error?.category !== 'configuration'
+          ? this.#state.error
+          : autoplayConfigurationError()
+        : hadConfigurationError &&
+            this.#state.error?.category === 'configuration'
           ? null
           : this.#state.error
     });
@@ -844,6 +848,11 @@ export class PlayerController {
   };
 
   #applyPatch = (patch: ProviderStatePatch, acceptAutoplay = true): void => {
+    const explicitProviderError =
+      patch.error !== undefined &&
+      patch.error !== null &&
+      (patch.lifecycle === 'error' || patch.error.fatal);
+    const nextLifecycle = patch.lifecycle ?? this.#state.lifecycle;
     const nextState: PlayerState = {
       ...this.#state,
       ...patch,
@@ -866,17 +875,20 @@ export class PlayerController {
           : acceptAutoplay
             ? (patch.autoplay ?? this.#state.autoplay)
             : this.#state.autoplay,
-      error: this.#hasAutoplayConfigurationError
-        ? this.#state.error?.category === 'configuration'
-          ? this.#state.error
-          : autoplayConfigurationError()
-        : patch.lifecycle === 'ready' && patch.error === undefined
-          ? null
-          : patch.error === undefined
+      error: explicitProviderError
+        ? freezeError(patch.error)
+        : this.#hasAutoplayConfigurationError
+          ? nextLifecycle === 'error' &&
+            this.#state.error?.category !== 'configuration'
             ? this.#state.error
-            : patch.error === null
-              ? null
-              : freezeError(patch.error)
+            : autoplayConfigurationError()
+          : patch.lifecycle === 'ready' && patch.error === undefined
+            ? null
+            : patch.error === undefined
+              ? this.#state.error
+              : patch.error === null
+                ? null
+                : freezeError(patch.error)
     };
     this.#setState(nextState);
   };
@@ -960,7 +972,10 @@ export class PlayerController {
     revision: number,
     mode: Exclude<AutoplayMode, false>
   ): void => {
-    if (!this.#isCurrentAutoplayAttempt(provider, generation, revision, mode))
+    if (
+      !this.#isCurrentAutoplayAttempt(provider, generation, revision, mode) ||
+      this.#state.autoplay !== 'attempting'
+    )
       return;
     this.#applyPatch({
       autoplay: result.reason === 'blocked' ? 'blocked' : 'failed',

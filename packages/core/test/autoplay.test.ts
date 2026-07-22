@@ -133,6 +133,27 @@ test('requires an attempting state and playing patch before autoplay starts', as
   pendingPlay.resolve({ ok: true });
 });
 
+test('keeps authoritative started state when the play promise later rejects', async () => {
+  const pendingPlay = deferred<CommandResult>();
+  const fake = createProvider({ play: () => pendingPlay.promise });
+  const controller = new PlayerController();
+  controller.configureAutoplay('audible');
+  controller.setProvider(fake.provider);
+  fake.emit({ lifecycle: 'ready', activation: 'ready' }, readyEvent);
+  await vi.waitFor(() => expect(fake.calls).toEqual(['play']));
+
+  fake.emit({ playback: 'playing' }, playEvent);
+  expect(controller.getState().autoplay).toBe('started');
+  pendingPlay.resolve({ ok: false, reason: 'blocked' });
+  await flushCommands();
+
+  expect(controller.getState()).toMatchObject({
+    playback: 'playing',
+    autoplay: 'started',
+    error: null
+  });
+});
+
 test('does not play after autoplay is disabled during deferred mute', async () => {
   const pendingMute = deferred<CommandResult>();
   const fake = createProvider({ mute: () => pendingMute.promise });
@@ -202,6 +223,40 @@ test('invalidates deferred autoplay when a controlled mute conflict appears', as
     error: { category: 'configuration', fatal: false, recoverable: true }
   });
   expect(origins).toEqual(['provider']);
+});
+
+test('preserves a fatal provider error through an autoplay conflict correction', () => {
+  const fatalError = {
+    category: 'decode',
+    fatal: true,
+    recoverable: false,
+    message: 'The provider could not decode the media.'
+  } as const;
+  const fake = createProvider();
+  const controller = new PlayerController();
+  controller.configureAutoplay('muted', { controlledMuted: false });
+  controller.setProvider(fake.provider);
+  fake.emit({ lifecycle: 'ready', activation: 'ready' }, readyEvent);
+
+  fake.emit({
+    lifecycle: 'error',
+    activation: 'error',
+    error: fatalError
+  });
+
+  expect(controller.getState()).toMatchObject({
+    lifecycle: 'error',
+    autoplay: 'failed',
+    error: fatalError
+  });
+
+  controller.configureAutoplay('muted', { controlledMuted: true });
+
+  expect(controller.getState()).toMatchObject({
+    lifecycle: 'error',
+    autoplay: 'idle',
+    error: fatalError
+  });
 });
 
 test('mutes before attempting muted autoplay and waits for confirmation', async () => {
