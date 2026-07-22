@@ -33,6 +33,15 @@ const { seekTo, setVolume, retry } = Player.usePlayerActions()
 
 await seekTo(30) // { ok: true } or { ok: false, reason, error? }`}</pre>
     <p>
+      Native playback can be constrained with <code>startTime</code> and{' '}
+      <code>endTime</code>. Add <code>loop</code> to restart that bounded
+      segment at its configured start. Ordinary loading is idempotent;{' '}
+      <code>retry()</code> forces a fresh load after an error.
+    </p>
+    <pre>{`<Player.Root source="/video.mp4" startTime={10} endTime={30} loop>
+  <Player.Media />
+</Player.Root>`}</pre>
+    <p>
       All commands return a promise of <code>CommandResult</code>:{' '}
       <code>play</code>, <code>pause</code>, <code>togglePlayback</code>, seek,
       mute, volume, rate, text-track, fullscreen, picture-in-picture, and retry.

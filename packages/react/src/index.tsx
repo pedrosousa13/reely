@@ -4,7 +4,10 @@ import {
   type PlayerSource,
   type PlayerState
 } from '@reely/core';
-import { createNativeProvider } from '@reely/provider-native';
+import {
+  createNativeProvider,
+  type NativePlaybackOptions
+} from '@reely/provider-native';
 import {
   createContext,
   useCallback,
@@ -61,15 +64,67 @@ const usePlayer = (): PlayerContextValue => {
   return player;
 };
 
+const selectionsEqual = (left: unknown, right: unknown): boolean => {
+  if (Object.is(left, right)) return true;
+  if (
+    typeof left !== 'object' ||
+    left === null ||
+    typeof right !== 'object' ||
+    right === null
+  ) {
+    return false;
+  }
+  const leftPrototype = Object.getPrototypeOf(left);
+  if (
+    leftPrototype !== Object.getPrototypeOf(right) ||
+    (leftPrototype !== Object.prototype && !Array.isArray(left))
+  ) {
+    return false;
+  }
+  const leftKeys = Object.keys(left);
+  const rightKeys = Object.keys(right);
+  return (
+    leftKeys.length === rightKeys.length &&
+    leftKeys.every(
+      (key) =>
+        Object.prototype.hasOwnProperty.call(right, key) &&
+        Object.is(
+          (left as Record<string, unknown>)[key],
+          (right as Record<string, unknown>)[key]
+        )
+    )
+  );
+};
+
 export const usePlayerState = <Selected,>(
   selector: (state: PlayerState) => Selected
 ): Selected => {
   const { controller } = usePlayer();
-  return useSyncExternalStore(
-    controller.subscribe,
-    () => selector(controller.getState()),
-    () => selector(controller.getState())
-  );
+  const selectionRef = useRef<{
+    initialized: boolean;
+    state?: PlayerState;
+    value?: Selected;
+  }>({ initialized: false });
+  const getSnapshot = useCallback((): Selected => {
+    const state = controller.getState();
+    if (
+      selectionRef.current.initialized &&
+      selectionRef.current.state === state
+    ) {
+      return selectionRef.current.value as Selected;
+    }
+    const nextSelection = selector(state);
+    if (
+      selectionRef.current.initialized &&
+      selectionsEqual(selectionRef.current.value, nextSelection)
+    ) {
+      selectionRef.current.state = state;
+      return selectionRef.current.value as Selected;
+    }
+    selectionRef.current = { initialized: true, state, value: nextSelection };
+    return nextSelection;
+  }, [controller, selector]);
+  return useSyncExternalStore(controller.subscribe, getSnapshot, getSnapshot);
 };
 
 export const usePlayerActions = (): PlayerActions => {
@@ -99,9 +154,12 @@ export const usePlayerActions = (): PlayerActions => {
 
 export const Root = ({
   children,
+  endTime,
+  loop,
   ref,
-  source
-}: {
+  source,
+  startTime
+}: NativePlaybackOptions & {
   children: ReactNode;
   ref?: Ref<PlayerHandle>;
   source: PlayerSource;
@@ -117,9 +175,13 @@ export const Root = ({
     (media: HTMLVideoElement | null) => {
       if (currentMedia.current === media) return;
       currentMedia.current = media;
-      controller.setProvider(media ? createNativeProvider(media) : undefined);
+      controller.setProvider(
+        media
+          ? createNativeProvider(media, { endTime, loop, startTime })
+          : undefined
+      );
     },
-    [controller]
+    [controller, endTime, loop, startTime]
   );
 
   const value = useMemo(
