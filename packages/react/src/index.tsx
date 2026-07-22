@@ -232,6 +232,14 @@ export const Root = ({
   const volumeChangeCallback = useRef(onVolumeChange);
   const playbackRateChangeCallback = useRef(onPlaybackRateChange);
   const autoplayConfiguration = useRef({ autoplay, muted });
+  const nativePlaybackOptions = useRef<NativePlaybackOptions>({
+    endTime,
+    loop,
+    startTime
+  });
+  const appliedNativePlaybackOptions = useRef<
+    NativePlaybackOptions | undefined
+  >(undefined);
   const pendingMuted = useRef<Reconciliation<boolean> | undefined>(undefined);
   const pendingVolume = useRef<Reconciliation<number> | undefined>(undefined);
   const pendingPlaybackRate = useRef<Reconciliation<number> | undefined>(
@@ -251,6 +259,7 @@ export const Root = ({
   volumeChangeCallback.current = onVolumeChange;
   playbackRateChangeCallback.current = onPlaybackRateChange;
   autoplayConfiguration.current = { autoplay, muted };
+  nativePlaybackOptions.current = { endTime, loop, startTime };
   /* eslint-enable react-hooks/refs */
 
   useImperativeHandle(ref, () => controller, [controller]);
@@ -391,14 +400,8 @@ export const Root = ({
     };
   }, [controller, reconcileMuted, reconcilePlaybackRate, reconcileVolume]);
 
-  const registerMedia = useCallback(
+  const attachMedia = useCallback(
     (media: HTMLVideoElement | null) => {
-      if (
-        currentMedia.current === media &&
-        (media === null || controller.getState().provider !== null)
-      )
-        return;
-      currentMedia.current = media;
       pendingMuted.current = undefined;
       pendingVolume.current = undefined;
       pendingPlaybackRate.current = undefined;
@@ -411,23 +414,44 @@ export const Root = ({
         const nextPlaybackRate =
           controlledPlaybackRate.current ?? desiredPlaybackRate.current;
         if (Number.isFinite(nextVolume)) {
-          media.volume = Math.min(1, Math.max(0, nextVolume));
+          try {
+            media.volume = Math.min(1, Math.max(0, nextVolume));
+          } catch {
+            // Initial preference seeding must not escape the provider boundary.
+          }
         }
         if (Number.isFinite(nextPlaybackRate) && nextPlaybackRate > 0) {
-          media.playbackRate = nextPlaybackRate;
+          try {
+            media.playbackRate = nextPlaybackRate;
+          } catch {
+            // Initial preference seeding must not escape the provider boundary.
+          }
         }
         ensurePreferenceSubscription();
         controller.configureAutoplay(autoplayConfiguration.current.autoplay, {
           controlledMuted: autoplayConfiguration.current.muted
         });
       }
+      const options = nativePlaybackOptions.current;
+      appliedNativePlaybackOptions.current = media ? options : undefined;
       controller.setProvider(
-        media
-          ? createNativeProvider(media, { endTime, loop, startTime })
-          : undefined
+        media ? createNativeProvider(media, options) : undefined
       );
     },
-    [controller, endTime, ensurePreferenceSubscription, loop, startTime]
+    [controller, ensurePreferenceSubscription]
+  );
+
+  const registerMedia = useCallback(
+    (media: HTMLVideoElement | null) => {
+      if (
+        currentMedia.current === media &&
+        (media === null || controller.getState().provider !== null)
+      )
+        return;
+      currentMedia.current = media;
+      attachMedia(media);
+    },
+    [attachMedia, controller]
   );
 
   useEffect(() => {
@@ -438,6 +462,21 @@ export const Root = ({
       controller.setProvider(undefined);
     };
   }, [controller, registerMedia]);
+
+  useEffect(() => {
+    const media = currentMedia.current;
+    const applied = appliedNativePlaybackOptions.current;
+    if (
+      !media ||
+      !applied ||
+      (Object.is(applied.endTime, endTime) &&
+        Object.is(applied.loop, loop) &&
+        Object.is(applied.startTime, startTime))
+    ) {
+      return;
+    }
+    attachMedia(media);
+  }, [attachMedia, endTime, loop, startTime]);
 
   useEffect(() => {
     controller.configureAutoplay(autoplay, { controlledMuted: muted });

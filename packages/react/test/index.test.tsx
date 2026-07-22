@@ -156,6 +156,37 @@ test('clamps finite default volume and skips an invalid default rate on replacem
   expect(replacement.playbackRate).toBe(1);
 });
 
+test.each([
+  ['volume', 0.4],
+  ['playbackRate', 1.5]
+] as const)(
+  'keeps provider lifecycle usable when a valid initial %s setter throws',
+  (property, value) => {
+    const setter = vi
+      .spyOn(HTMLMediaElement.prototype, property, 'set')
+      .mockImplementation(() => {
+        throw new DOMException(`The browser rejected ${property}.`);
+      });
+    const handle = createRef<Player.PlayerHandle>();
+    const preferences =
+      property === 'volume'
+        ? { defaultVolume: value }
+        : { defaultPlaybackRate: value };
+
+    render(
+      <Player.Root ref={handle} source="/tracer.mp4" {...preferences}>
+        <Player.Media />
+      </Player.Root>
+    );
+    const media = screen.getByLabelText<HTMLVideoElement>('Reely media');
+
+    expect(setter).toHaveBeenCalledWith(value);
+    expect(handle.current?.getState().provider).toBe('native');
+    confirmMetadataReady(media);
+    expect(handle.current?.getState().lifecycle).toBe('ready');
+  }
+);
+
 test('seeds default preferences once and retains confirmed values across media replacement', () => {
   const player = (
     source: string,
@@ -931,6 +962,57 @@ test('passes loop and playback boundaries from Root to the native adapter', asyn
   await Promise.resolve();
   expect(media.currentTime).toBe(3);
   expect(play).toHaveBeenCalledOnce();
+});
+
+test('replaces the provider once when native playback options change', async () => {
+  const load = vi
+    .spyOn(HTMLMediaElement.prototype, 'load')
+    .mockImplementation(() => undefined);
+  const play = vi
+    .spyOn(HTMLMediaElement.prototype, 'play')
+    .mockImplementation(function (this: HTMLMediaElement) {
+      this.dispatchEvent(new Event('play'));
+      return Promise.resolve();
+    });
+  const handle = createRef<Player.PlayerHandle>();
+  const player = (startTime: number) => (
+    <Player.Root
+      autoplay="audible"
+      ref={handle}
+      source="/tracer.mp4"
+      startTime={startTime}
+    >
+      <Player.Media />
+      <Player.PlayButton />
+    </Player.Root>
+  );
+  const { rerender } = render(player(0));
+  const media = screen.getByLabelText<HTMLVideoElement>('Reely media');
+  confirmMetadataReady(media);
+  await waitFor(() => expect(play).toHaveBeenCalledOnce());
+  await waitFor(() => expect(load).toHaveBeenCalledOnce());
+  play.mockClear();
+  load.mockClear();
+  const providerStates: Array<string | null> = [];
+  const unsubscribe = handle.current?.subscribe((state) =>
+    providerStates.push(state.provider)
+  );
+  providerStates.length = 0;
+
+  rerender(player(1));
+  await waitFor(() => expect(play).toHaveBeenCalled());
+  await waitFor(() => expect(load).toHaveBeenCalled());
+  await new Promise((resolve) => setTimeout(resolve, 0));
+
+  expect(play).toHaveBeenCalledTimes(1);
+  expect(load).toHaveBeenCalledTimes(1);
+  expect(providerStates).toEqual(expect.arrayContaining(['native']));
+  expect(providerStates).not.toContain(null);
+  expect(handle.current?.getState()).toMatchObject({
+    provider: 'native',
+    autoplay: 'started'
+  });
+  unsubscribe?.();
 });
 
 test('destroys the previous native adapter and ignores its stale events on source switch', async () => {
