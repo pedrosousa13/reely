@@ -24,6 +24,7 @@
     "react-dom": "19.2.8"
   },
   "scripts": {
-    "build": "vite build && tsc -b"
+    "build": "vite build && tsc -b",
+    "test": "vitest run --config ../../vitest.config.ts packages/react/test"
   }
 }

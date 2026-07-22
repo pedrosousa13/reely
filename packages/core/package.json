@@ -13,6 +13,6 @@
   ],
   "scripts": {
     "build": "vite build && tsc -b",
-    "test": "vitest run"
+    "test": "vitest run --config ../../vitest.config.ts packages/core/test"
   }
 }

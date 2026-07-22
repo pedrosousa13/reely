@@ -20,6 +20,53 @@ const App = () => (
       working MP4 example. HLS and provider sources are detected in this issue,
       but <code>Player.Media</code> does not load them yet.
     </p>
+    <h2>Playback API</h2>
+    <p>
+      Get a <code>PlayerHandle</code> from the <code>ref</code> prop on{' '}
+      <code>Player.Root</code>, or call <code>usePlayerActions()</code> and{' '}
+      <code>usePlayerState(selector)</code> inside the Root. Selectors subscribe
+      directly to the controller, so they only rerender when their selected
+      value changes.
+    </p>
+    <pre>{`const playback = Player.usePlayerState((state) => state.playback)
+const { seekTo, setVolume, retry } = Player.usePlayerActions()
+
+await seekTo(30) // { ok: true } or { ok: false, reason, error? }`}</pre>
+    <p>
+      Native playback can be constrained with <code>startTime</code> and{' '}
+      <code>endTime</code>. Add <code>loop</code> to restart that bounded
+      segment at its configured start. Ordinary loading is idempotent;{' '}
+      <code>retry()</code> forces a fresh load after an error.
+    </p>
+    <pre>{`<Player.Root source="/video.mp4" startTime={10} endTime={30} loop>
+  <Player.Media />
+</Player.Root>`}</pre>
+    <p>
+      All commands return a promise of <code>CommandResult</code>:{' '}
+      <code>play</code>, <code>pause</code>, <code>togglePlayback</code>, seek,
+      mute, volume, rate, text-track, fullscreen, picture-in-picture, and retry.
+      Failures are <code>blocked</code>, <code>unsupported</code>,{' '}
+      <code>not-ready</code>, or <code>provider-error</code>; they do not throw
+      through the React UI boundary.
+    </p>
+    <p>
+      State includes lifecycle, confirmed playback, buffering, seeking, time
+      ranges, audio settings, fullscreen and picture-in-picture, provider,
+      autoplay status, capabilities, and a nullable error. Capabilities report
+      <code>available</code>, <code>unknown</code>, or <code>unavailable</code>{' '}
+      with a reason. Subscribe to typed provider events with{' '}
+      <code>handle.on(type, listener)</code>; each event includes its type,
+      detail, origin, provider, timestamp, and (when available) the native
+      event.
+    </p>
+    <p>
+      Errors have a category (<code>configuration</code>, <code>source</code>,{' '}
+      <code>network</code>, <code>decode</code>, <code>provider</code>,{' '}
+      <code>policy</code>, or <code>unsupported</code>) plus fatal and
+      recoverable semantics. Native media events remain the source of truth: a
+      successful command does not optimistically change confirmed playback
+      state.
+    </p>
     <pre>{`// String sources
 <Player.Root source="/video.mp4">...</Player.Root>
 <Player.Root source="https://cdn.example.com/video.webm">...</Player.Root>

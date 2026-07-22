@@ -1,5 +1,8 @@
+// @vitest-environment happy-dom
+
 import * as process from 'node:process';
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { createRef } from 'react';
 import { afterEach, expect, test, vi } from 'vitest';
 import * as Player from '../src/index';
 
@@ -7,6 +10,17 @@ afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
 });
+
+const verifyReadonlyStateTypes = (
+  state: ReturnType<Player.PlayerHandle['getState']>
+): void => {
+  // @ts-expect-error PlayerState snapshots are readonly.
+  state.volume = 0;
+  // @ts-expect-error Nested capabilities are readonly.
+  state.capabilities.seek.status = 'available';
+  // @ts-expect-error Nested time ranges are readonly.
+  state.buffered[0]!.end = 10;
+};
 
 test('keeps confirmed paused state when the media play command rejects', async () => {
   const unhandledRejections: unknown[] = [];
@@ -98,3 +112,211 @@ test.each([
     ).toBe('paused');
   }
 );
+
+test('exposes stable actions and a ref handle backed by the Root controller', () => {
+  const handle = createRef<Player.PlayerHandle>();
+  const actionReferences: Player.PlayerActions[] = [];
+  const Probe = () => {
+    actionReferences.push(Player.usePlayerActions());
+    Player.usePlayerState((state) => state.playback);
+    return null;
+  };
+  const player = () => (
+    <Player.Root ref={handle} source="/tracer.mp4">
+      <Player.Media />
+      <Probe />
+    </Player.Root>
+  );
+  const { rerender } = render(player());
+
+  rerender(player());
+
+  expect(actionReferences).toHaveLength(2);
+  expect(actionReferences[0]).toBe(actionReferences[1]);
+  expect(actionReferences[0]?.play).toBe(handle.current?.play);
+  expect(handle.current?.getState().playback).toBe('paused');
+  expect(handle.current).toMatchObject({
+    getState: expect.any(Function),
+    play: expect.any(Function)
+  });
+  handle.current?.on('volumechange', (event) => {
+    expect(event.detail.volume).toBeTypeOf('number');
+  });
+  expect(verifyReadonlyStateTypes).toBeTypeOf('function');
+});
+
+test('throws a clear error when player hooks are used outside Root', () => {
+  const Probe = () => {
+    Player.usePlayerState((state) => state.playback);
+    return null;
+  };
+
+  expect(() => render(<Probe />)).toThrow(/inside Player.Root/i);
+});
+
+test('reads the same controller state through PlayerHandle and usePlayerState', () => {
+  const handle = createRef<Player.PlayerHandle>();
+  let selectedPlayback = 'unobserved';
+  const Probe = () => {
+    selectedPlayback = Player.usePlayerState((state) => state.playback);
+    return null;
+  };
+  render(
+    <Player.Root ref={handle} source="/tracer.mp4">
+      <Player.Media />
+      <Probe />
+    </Player.Root>
+  );
+
+  fireEvent.play(screen.getByLabelText('Reely media'));
+
+  expect(selectedPlayback).toBe('playing');
+  expect(handle.current?.getState().playback).toBe('playing');
+});
+
+test('does not rerender a selector when an unrelated confirmed state changes', () => {
+  let renders = 0;
+  const Volume = () => {
+    Player.usePlayerState((state) => state.volume);
+    renders += 1;
+    return null;
+  };
+
+  render(
+    <Player.Root source="/tracer.mp4">
+      <Player.Media />
+      <Volume />
+    </Player.Root>
+  );
+  const initialRenders = renders;
+
+  fireEvent.play(screen.getByLabelText('Reely media'));
+
+  expect(renders).toBe(initialRenders);
+});
+
+test('caches an object selector and isolates it from unrelated state changes', () => {
+  let renders = 0;
+  const Volume = () => {
+    const selection = Player.usePlayerState((state) => ({
+      volume: state.volume
+    }));
+    renders += 1;
+    return <output>{selection.volume}</output>;
+  };
+
+  render(
+    <Player.Root source="/tracer.mp4">
+      <Player.Media />
+      <Volume />
+    </Player.Root>
+  );
+  const initialRenders = renders;
+
+  fireEvent.play(screen.getByLabelText('Reely media'));
+
+  expect(screen.getByText('1')).toBeDefined();
+  expect(renders).toBe(initialRenders);
+});
+
+test('observes changes to enumerable symbol-key selector values', () => {
+  const volume = Symbol('volume');
+  const Volume = () => {
+    const selection = Player.usePlayerState((state) => ({
+      [volume]: state.volume
+    }));
+    return <output>{selection[volume]}</output>;
+  };
+  render(
+    <Player.Root source="/tracer.mp4">
+      <Player.Media />
+      <Volume />
+    </Player.Root>
+  );
+  const media = screen.getByLabelText<HTMLVideoElement>('Reely media');
+  media.volume = 0.4;
+
+  fireEvent.volumeChange(media);
+
+  expect(screen.getByText('0.4')).toBeDefined();
+});
+
+test('reevaluates a changed selector when controller state is unchanged', () => {
+  const Selection = ({ selectPlayback }: { selectPlayback: boolean }) => {
+    const selected = Player.usePlayerState((state) =>
+      selectPlayback ? state.playback : state.volume
+    );
+    return <output>{selected}</output>;
+  };
+  const player = (selectPlayback: boolean) => (
+    <Player.Root source="/tracer.mp4">
+      <Selection selectPlayback={selectPlayback} />
+    </Player.Root>
+  );
+  const { rerender } = render(player(false));
+  expect(screen.getByText('1')).toBeDefined();
+
+  rerender(player(true));
+
+  expect(screen.getByText('paused')).toBeDefined();
+});
+
+test('throws a clear error when usePlayerActions is used outside Root', () => {
+  const Probe = () => {
+    Player.usePlayerActions();
+    return null;
+  };
+
+  expect(() => render(<Probe />)).toThrow(/inside Player.Root/i);
+});
+
+test('passes loop and playback boundaries from Root to the native adapter', async () => {
+  const play = vi
+    .spyOn(HTMLMediaElement.prototype, 'play')
+    .mockResolvedValue(undefined);
+  render(
+    <Player.Root loop startTime={3} endTime={6} source="/tracer.mp4">
+      <Player.Media />
+    </Player.Root>
+  );
+  const media = screen.getByLabelText<HTMLVideoElement>('Reely media');
+
+  fireEvent.loadedMetadata(media);
+  expect(media.currentTime).toBe(3);
+
+  media.currentTime = 6;
+  fireEvent.timeUpdate(media);
+  await Promise.resolve();
+  expect(media.currentTime).toBe(3);
+  expect(play).toHaveBeenCalledOnce();
+});
+
+test('destroys the previous native adapter and ignores its stale events on source switch', async () => {
+  const removeEventListener = vi.spyOn(
+    HTMLMediaElement.prototype,
+    'removeEventListener'
+  );
+  const player = (source: string) => (
+    <Player.Root source={source}>
+      <Player.Media />
+      <Player.PlayButton />
+    </Player.Root>
+  );
+  const { rerender } = render(player('/first.mp4'));
+  const previousMedia = screen.getByLabelText('Reely media');
+
+  rerender(player('/second.mp4'));
+  expect(removeEventListener).toHaveBeenCalledWith(
+    'play',
+    expect.any(Function)
+  );
+  await Promise.resolve();
+  const currentMedia = screen.getByLabelText('Reely media');
+  expect(currentMedia).not.toBe(previousMedia);
+
+  fireEvent.play(previousMedia);
+  expect(screen.getByRole('button', { name: 'Play' })).toBeDefined();
+
+  fireEvent.play(currentMedia);
+  expect(screen.getByRole('button', { name: 'Pause' })).toBeDefined();
+});

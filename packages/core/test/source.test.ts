@@ -3,10 +3,10 @@
 import { expect, test } from 'vitest';
 import {
   PlayerController,
+  createInitialPlayerState,
   detectSource,
   type HlsSource,
-  type MediaProvider,
-  type PlaybackState,
+  type ProviderStateListener,
   type VideoFileSource,
   type VimeoSource,
   type YouTubeSource
@@ -240,84 +240,704 @@ test('imports and runs source detection in Node without browser globals', () => 
   expect(expectDetected('/server-rendered.mp4').source.type).toBe('video');
 });
 
-const createTestProvider = () => {
-  let listener: ((state: PlaybackState) => void) | undefined;
-  let destroyCount = 0;
-  let subscribeCount = 0;
-  let unsubscribeCount = 0;
-  const provider: MediaProvider = {
-    play: async () => undefined,
-    pause: () => undefined,
-    subscribe: (nextListener) => {
-      subscribeCount += 1;
-      listener = nextListener;
-      return () => {
-        unsubscribeCount += 1;
-        listener = undefined;
-      };
+test('returns not-ready without changing confirmed playback when no provider is attached', async () => {
+  const controller = new PlayerController();
+
+  await expect(controller.play()).resolves.toEqual({
+    ok: false,
+    reason: 'not-ready'
+  });
+  expect(controller.getState()).toMatchObject({ playback: 'paused' });
+});
+
+test('keeps confirmed playback paused until a provider event confirms play', async () => {
+  let emit: ((state: { playback: 'playing' }) => void) | undefined;
+  const controller = new PlayerController();
+  controller.setProvider({
+    provider: 'native',
+    attach: () => undefined,
+    load: () => undefined,
+    destroy: () => undefined,
+    subscribe: (listener) => {
+      emit = listener;
+      return () => undefined;
     },
-    destroy: () => {
-      destroyCount += 1;
+    play: async () => ({ ok: true })
+  });
+
+  await expect(controller.play()).resolves.toEqual({ ok: true });
+  expect(controller.getState()).toMatchObject({ playback: 'paused' });
+
+  emit?.({ playback: 'playing' });
+  expect(controller.getState()).toMatchObject({ playback: 'playing' });
+});
+
+test('returns unsupported and provider-error command results without throwing', async () => {
+  const controller = new PlayerController();
+  controller.setProvider({
+    provider: 'native',
+    attach: () => undefined,
+    load: () => undefined,
+    destroy: () => undefined,
+    subscribe: () => () => undefined,
+    play: async () => {
+      throw new Error('native failed');
+    }
+  });
+
+  await expect(controller.seekTo(10)).resolves.toEqual({
+    ok: false,
+    reason: 'unsupported'
+  });
+  await expect(controller.play()).resolves.toMatchObject({
+    ok: false,
+    reason: 'provider-error',
+    error: { category: 'provider', message: 'native failed' }
+  });
+});
+
+test('preserves adapter method this binding for commands', async () => {
+  const controller = new PlayerController();
+  controller.setProvider({
+    provider: 'native',
+    attach() {
+      return undefined;
+    },
+    load() {
+      return undefined;
+    },
+    destroy() {
+      return undefined;
+    },
+    subscribe() {
+      return () => undefined;
+    },
+    async play() {
+      return this.provider === 'native'
+        ? ({ ok: true } as const)
+        : ({ ok: false, reason: 'provider-error' } as const);
+    }
+  });
+
+  await expect(controller.play()).resolves.toEqual({ ok: true });
+});
+
+test('ignores stale events after replacing a provider', () => {
+  let emitFirst: ((state: { playback: 'playing' }) => void) | undefined;
+  const createProvider = (
+    subscribe: (listener: (state: { playback: 'playing' }) => void) => void
+  ) => ({
+    provider: 'native' as const,
+    attach: () => undefined,
+    load: () => undefined,
+    destroy: () => undefined,
+    subscribe: (listener: (state: { playback: 'playing' }) => void) => {
+      subscribe(listener);
+      return () => undefined;
+    }
+  });
+  const controller = new PlayerController();
+  controller.setProvider(createProvider((listener) => (emitFirst = listener)));
+  controller.setProvider(createProvider(() => undefined));
+
+  emitFirst?.({ playback: 'playing' });
+
+  expect(controller.getState().playback).toBe('paused');
+});
+
+test('stops provider A setup when its loading state subscriber installs B', () => {
+  let aSubscribeCount = 0;
+  let aAttachCount = 0;
+  let bSubscribeCount = 0;
+  const controller = new PlayerController();
+  const providerB = {
+    provider: 'hls' as const,
+    attach: () => undefined,
+    load: () => undefined,
+    destroy: () => undefined,
+    subscribe: () => {
+      bSubscribeCount += 1;
+      return () => undefined;
+    }
+  };
+  controller.subscribe((state) => {
+    if (state.provider === 'native') controller.setProvider(providerB);
+  });
+
+  controller.setProvider({
+    provider: 'native',
+    attach: () => {
+      aAttachCount += 1;
+    },
+    load: () => undefined,
+    destroy: () => undefined,
+    subscribe: () => {
+      aSubscribeCount += 1;
+      return () => undefined;
+    }
+  });
+
+  expect(aSubscribeCount).toBe(0);
+  expect(aAttachCount).toBe(0);
+  expect(bSubscribeCount).toBe(1);
+  expect(controller.getState().provider).toBe('hls');
+});
+
+test('cleans a stale subscription when provider A subscribe installs B', () => {
+  let aUnsubscribeCount = 0;
+  let aAttachCount = 0;
+  let bUnsubscribeCount = 0;
+  const controller = new PlayerController();
+  const providerB = {
+    provider: 'hls' as const,
+    attach: () => undefined,
+    load: () => undefined,
+    destroy: () => undefined,
+    subscribe: () => () => {
+      bUnsubscribeCount += 1;
     }
   };
 
-  return {
-    provider,
-    emit: (state: PlaybackState) => listener?.(state),
-    counts: () => ({ destroyCount, subscribeCount, unsubscribeCount })
+  controller.setProvider({
+    provider: 'native',
+    attach: () => {
+      aAttachCount += 1;
+    },
+    load: () => undefined,
+    destroy: () => undefined,
+    subscribe: () => {
+      controller.setProvider(providerB);
+      return () => {
+        aUnsubscribeCount += 1;
+      };
+    }
+  });
+  controller.setProvider(undefined);
+
+  expect(aUnsubscribeCount).toBe(1);
+  expect(aAttachCount).toBe(0);
+  expect(bUnsubscribeCount).toBe(1);
+});
+
+test('stops outer setup when previous unsubscribe installs provider B', () => {
+  let previousDestroyCount = 0;
+  let targetSubscribeCount = 0;
+  let bUnsubscribeCount = 0;
+  const controller = new PlayerController();
+  const providerB = {
+    provider: 'vimeo' as const,
+    attach: () => undefined,
+    load: () => undefined,
+    destroy: () => undefined,
+    subscribe: () => () => {
+      bUnsubscribeCount += 1;
+    }
   };
-};
+  controller.setProvider({
+    provider: 'native',
+    attach: () => undefined,
+    load: () => undefined,
+    destroy: () => {
+      previousDestroyCount += 1;
+    },
+    subscribe: () => () => controller.setProvider(providerB)
+  });
 
-test('setting the same provider is a no-op', () => {
+  controller.setProvider({
+    provider: 'hls',
+    attach: () => undefined,
+    load: () => undefined,
+    destroy: () => undefined,
+    subscribe: () => {
+      targetSubscribeCount += 1;
+      return () => undefined;
+    }
+  });
+
+  expect(controller.getState().provider).toBe('vimeo');
+  expect(previousDestroyCount).toBe(1);
+  expect(targetSubscribeCount).toBe(0);
+  controller.setProvider(undefined);
+  expect(bUnsubscribeCount).toBe(1);
+});
+
+test('does not recurse or continue outer setup when previous destroy installs B', () => {
+  let previousDestroyCount = 0;
+  let targetSubscribeCount = 0;
+  let bUnsubscribeCount = 0;
   const controller = new PlayerController();
-  const testProvider = createTestProvider();
-  controller.setProvider(testProvider.provider);
-  testProvider.emit('playing');
+  const providerB = {
+    provider: 'vimeo' as const,
+    attach: () => undefined,
+    load: () => undefined,
+    destroy: () => undefined,
+    subscribe: () => () => {
+      bUnsubscribeCount += 1;
+    }
+  };
+  controller.setProvider({
+    provider: 'native',
+    attach: () => undefined,
+    load: () => undefined,
+    destroy: () => {
+      previousDestroyCount += 1;
+      if (previousDestroyCount === 1) controller.setProvider(providerB);
+    },
+    subscribe: () => () => undefined
+  });
 
-  controller.setProvider(testProvider.provider);
+  controller.setProvider({
+    provider: 'hls',
+    attach: () => undefined,
+    load: () => undefined,
+    destroy: () => undefined,
+    subscribe: () => {
+      targetSubscribeCount += 1;
+      return () => undefined;
+    }
+  });
 
-  expect(controller.getState()).toBe('playing');
-  expect(testProvider.counts()).toEqual({
-    destroyCount: 0,
-    subscribeCount: 1,
-    unsubscribeCount: 0
+  expect(controller.getState().provider).toBe('vimeo');
+  expect(previousDestroyCount).toBe(1);
+  expect(targetSubscribeCount).toBe(0);
+  controller.setProvider(undefined);
+  expect(bUnsubscribeCount).toBe(1);
+});
+
+test('labels an A event with A when its patch subscriber installs B', () => {
+  let emitA: ProviderStateListener | undefined;
+  const events: Array<{ provider: string | null }> = [];
+  const controller = new PlayerController();
+  const providerB = {
+    provider: 'hls' as const,
+    attach: () => undefined,
+    load: () => undefined,
+    destroy: () => undefined,
+    subscribe: () => () => undefined
+  };
+  controller.subscribe((state) => {
+    if (state.playback === 'playing') controller.setProvider(providerB);
+  });
+  controller.on('play', (event) => events.push(event));
+  controller.setProvider({
+    provider: 'native',
+    attach: () => undefined,
+    load: () => undefined,
+    destroy: () => undefined,
+    subscribe: (listener) => {
+      emitA = listener;
+      return () => undefined;
+    }
+  });
+
+  emitA?.(
+    { playback: 'playing' },
+    { type: 'play', detail: undefined, origin: 'provider' }
+  );
+
+  expect(controller.getState().provider).toBe('hls');
+  expect(events).toEqual([expect.objectContaining({ provider: 'native' })]);
+});
+
+test('does not load an adapter after it has been replaced during attach', async () => {
+  let firstLoadCount = 0;
+  const createProvider = (load: () => void) => ({
+    provider: 'native' as const,
+    attach: () => undefined,
+    load,
+    destroy: () => undefined,
+    subscribe: () => () => undefined
+  });
+  const controller = new PlayerController();
+  controller.setProvider(createProvider(() => (firstLoadCount += 1)));
+  controller.setProvider(createProvider(() => undefined));
+
+  await new Promise((resolve) => setTimeout(resolve, 0));
+
+  expect(firstLoadCount).toBe(0);
+});
+
+test('preserves range identities when an unrelated provider patch arrives', () => {
+  let emit: ProviderStateListener | undefined;
+  const controller = new PlayerController();
+  controller.setProvider({
+    provider: 'native',
+    attach: () => undefined,
+    load: () => undefined,
+    destroy: () => undefined,
+    subscribe: (listener) => {
+      emit = listener;
+      return () => undefined;
+    }
+  });
+  emit?.({
+    buffered: [{ start: 0, end: 4 }],
+    seekable: [{ start: 0, end: 10 }]
+  });
+  const { buffered, seekable } = controller.getState();
+
+  emit?.({ buffering: true });
+
+  expect(controller.getState().buffered).toBe(buffered);
+  expect(controller.getState().seekable).toBe(seekable);
+});
+
+test('protects public state snapshots and their nested values from mutation', () => {
+  let emit: ProviderStateListener | undefined;
+  const controller = new PlayerController();
+  controller.setProvider({
+    provider: 'native',
+    attach: () => undefined,
+    load: () => undefined,
+    destroy: () => undefined,
+    subscribe: (listener) => {
+      emit = listener;
+      return () => undefined;
+    }
+  });
+  emit?.({ buffered: [{ start: 0, end: 3 }] });
+  const state = controller.getState();
+
+  expect(() => Object.assign(state, { volume: 0 })).toThrow();
+  expect(() =>
+    Object.assign(state.capabilities.seek, { status: 'available' })
+  ).toThrow();
+  expect(() => Object.assign(state.buffered[0]!, { end: 10 })).toThrow();
+  expect(controller.getState()).toMatchObject({
+    volume: 1,
+    buffered: [{ start: 0, end: 3 }]
   });
 });
 
-test('replacing a provider cleans up the old provider and resets state', () => {
+test('contains synchronous unsubscribe, destroy, and attach failures', async () => {
   const controller = new PlayerController();
-  const firstProvider = createTestProvider();
-  const secondProvider = createTestProvider();
-  controller.setProvider(firstProvider.provider);
-  firstProvider.emit('playing');
-
-  controller.setProvider(secondProvider.provider);
-
-  expect(controller.getState()).toBe('paused');
-  expect(firstProvider.counts()).toEqual({
-    destroyCount: 1,
-    subscribeCount: 1,
-    unsubscribeCount: 1
+  controller.setProvider({
+    provider: 'native',
+    attach: () => undefined,
+    load: () => undefined,
+    destroy: () => {
+      throw new Error('destroy failed');
+    },
+    subscribe: () => () => {
+      throw new Error('unsubscribe failed');
+    }
   });
-  expect(secondProvider.counts()).toEqual({
-    destroyCount: 0,
-    subscribeCount: 1,
-    unsubscribeCount: 0
+
+  expect(() =>
+    controller.setProvider({
+      provider: 'native',
+      attach: () => {
+        throw new Error('attach failed');
+      },
+      load: () => undefined,
+      destroy: () => undefined,
+      subscribe: () => () => undefined
+    })
+  ).not.toThrow();
+
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  expect(controller.getState()).toMatchObject({
+    lifecycle: 'error',
+    error: { message: 'attach failed' }
   });
 });
 
-test('removing a provider cleans it up and resets state', () => {
+test('contains subscribe failure and destroys the failed provider', async () => {
+  let destroyCount = 0;
   const controller = new PlayerController();
-  const testProvider = createTestProvider();
-  controller.setProvider(testProvider.provider);
-  testProvider.emit('playing');
+
+  expect(() =>
+    controller.setProvider({
+      provider: 'native',
+      attach: () => undefined,
+      load: () => undefined,
+      destroy: () => {
+        destroyCount += 1;
+      },
+      subscribe: () => {
+        throw new Error('subscribe failed');
+      }
+    })
+  ).not.toThrow();
+
+  expect(destroyCount).toBe(1);
+  expect(controller.getState()).toMatchObject({
+    lifecycle: 'error',
+    activation: 'error',
+    error: { message: 'subscribe failed' }
+  });
+  await expect(controller.play()).resolves.toEqual({
+    ok: false,
+    reason: 'not-ready'
+  });
+});
+
+test('resets to the initial state when detaching after subscribe failure', () => {
+  const controller = new PlayerController();
+  controller.setProvider({
+    provider: 'native',
+    attach: () => undefined,
+    load: () => undefined,
+    destroy: () => undefined,
+    subscribe: () => {
+      throw new Error('subscribe failed');
+    }
+  });
 
   controller.setProvider(undefined);
 
-  expect(controller.getState()).toBe('paused');
-  expect(testProvider.counts()).toEqual({
-    destroyCount: 1,
-    subscribeCount: 1,
-    unsubscribeCount: 1
+  expect(controller.getState()).toEqual(createInitialPlayerState());
+});
+
+test('ignores a callback captured before subscribe failure', () => {
+  let emit: ProviderStateListener | undefined;
+  const controller = new PlayerController();
+  controller.setProvider({
+    provider: 'native',
+    attach: () => undefined,
+    load: () => undefined,
+    destroy: () => undefined,
+    subscribe: (listener) => {
+      emit = listener;
+      throw new Error('subscribe failed');
+    }
   });
+
+  emit?.({ lifecycle: 'ready', activation: 'ready' });
+
+  expect(controller.getState()).toMatchObject({
+    lifecycle: 'error',
+    activation: 'error',
+    provider: 'native',
+    error: { message: 'subscribe failed' }
+  });
+});
+
+test('contains rejected destroy and load failures without stale state', async () => {
+  const controller = new PlayerController();
+  controller.setProvider({
+    provider: 'native',
+    attach: () => undefined,
+    load: () => undefined,
+    destroy: () => Promise.reject(new Error('destroy rejected')),
+    subscribe: () => () => undefined
+  });
+  controller.setProvider({
+    provider: 'native',
+    attach: () => undefined,
+    load: () => Promise.reject(new Error('load rejected')),
+    destroy: () => undefined,
+    subscribe: () => () => undefined
+  });
+
+  await new Promise((resolve) => setTimeout(resolve, 0));
+
+  expect(controller.getState()).toMatchObject({
+    lifecycle: 'error',
+    error: { message: 'load rejected' }
+  });
+});
+
+test('retry enters loading, clears the error, and accepts authoritative recovery', async () => {
+  let emit: ProviderStateListener | undefined;
+  const controller = new PlayerController();
+  controller.setProvider({
+    provider: 'native',
+    attach: () => undefined,
+    load: () => undefined,
+    destroy: () => undefined,
+    subscribe: (listener) => {
+      emit = listener;
+      return () => undefined;
+    },
+    retry: async () => ({ ok: true })
+  });
+  emit?.({
+    lifecycle: 'error',
+    activation: 'error',
+    error: {
+      category: 'network',
+      fatal: true,
+      recoverable: true,
+      message: 'network failed'
+    }
+  });
+
+  const retry = controller.retry();
+
+  expect(controller.getState()).toMatchObject({
+    lifecycle: 'loading',
+    activation: 'loading-provider',
+    error: null
+  });
+  await expect(retry).resolves.toEqual({ ok: true });
+  emit?.({ lifecycle: 'ready', activation: 'ready' });
+  expect(controller.getState()).toMatchObject({
+    lifecycle: 'ready',
+    error: null
+  });
+});
+
+test('does not invoke replacement B retry when loading publication replaces A', async () => {
+  let aRetryCount = 0;
+  let bRetryCount = 0;
+  let replaceOnLoading = false;
+  const controller = new PlayerController();
+  const providerB = {
+    provider: 'hls' as const,
+    attach: () => undefined,
+    load: () => undefined,
+    destroy: () => undefined,
+    subscribe: () => () => undefined,
+    retry: async () => {
+      bRetryCount += 1;
+      return { ok: true } as const;
+    }
+  };
+  controller.subscribe((state) => {
+    if (replaceOnLoading && state.lifecycle === 'loading') {
+      replaceOnLoading = false;
+      controller.setProvider(providerB);
+    }
+  });
+  controller.setProvider({
+    provider: 'native',
+    attach: () => undefined,
+    load: () => undefined,
+    destroy: () => undefined,
+    subscribe: () => () => undefined,
+    retry: async () => {
+      aRetryCount += 1;
+      return { ok: true } as const;
+    }
+  });
+  replaceOnLoading = true;
+
+  await controller.retry();
+
+  expect(aRetryCount).toBe(0);
+  expect(bRetryCount).toBe(0);
+  expect(controller.getState().provider).toBe('hls');
+});
+
+test('ignores stale retry failure after a replacement provider is ready', async () => {
+  let resolveRetry:
+    | ((result: {
+        ok: false;
+        reason: 'provider-error';
+        error: {
+          category: 'provider';
+          fatal: false;
+          recoverable: true;
+          message: string;
+        };
+      }) => void)
+    | undefined;
+  let emitReplacement: ProviderStateListener | undefined;
+  const controller = new PlayerController();
+  controller.setProvider({
+    provider: 'native',
+    attach: () => undefined,
+    load: () => undefined,
+    destroy: () => undefined,
+    subscribe: () => () => undefined,
+    retry: () => new Promise((resolve) => (resolveRetry = resolve))
+  });
+  const retry = controller.retry();
+  controller.setProvider({
+    provider: 'native',
+    attach: () => undefined,
+    load: () => undefined,
+    destroy: () => undefined,
+    subscribe: (listener) => {
+      emitReplacement = listener;
+      return () => undefined;
+    }
+  });
+  emitReplacement?.({ lifecycle: 'ready', activation: 'ready' });
+
+  resolveRetry?.({
+    ok: false,
+    reason: 'provider-error',
+    error: {
+      category: 'provider',
+      fatal: false,
+      recoverable: true,
+      message: 'stale retry failed'
+    }
+  });
+  await retry;
+
+  expect(controller.getState()).toMatchObject({
+    lifecycle: 'ready',
+    activation: 'ready',
+    error: null
+  });
+});
+
+test('restores the prior coherent error state when retry fails without an error', async () => {
+  let emit: ProviderStateListener | undefined;
+  const controller = new PlayerController();
+  controller.setProvider({
+    provider: 'native',
+    attach: () => undefined,
+    load: () => undefined,
+    destroy: () => undefined,
+    subscribe: (listener) => {
+      emit = listener;
+      return () => undefined;
+    },
+    retry: async () => ({ ok: false, reason: 'unsupported' })
+  });
+  emit?.({
+    lifecycle: 'error',
+    activation: 'error',
+    error: {
+      category: 'network',
+      fatal: true,
+      recoverable: true,
+      message: 'original error'
+    }
+  });
+
+  await expect(controller.retry()).resolves.toEqual({
+    ok: false,
+    reason: 'unsupported'
+  });
+
+  expect(controller.getState()).toMatchObject({
+    lifecycle: 'error',
+    activation: 'error',
+    error: { message: 'original error' }
+  });
+});
+
+test('keys event listener detail types by the subscribed event name', () => {
+  let emit: ProviderStateListener | undefined;
+  const controller = new PlayerController();
+  controller.setProvider({
+    provider: 'native',
+    attach: () => undefined,
+    load: () => undefined,
+    destroy: () => undefined,
+    subscribe: (listener) => {
+      emit = listener;
+      return () => undefined;
+    }
+  });
+  let observedVolume: number | undefined;
+  controller.on('volumechange', (event) => {
+    observedVolume = event.detail.volume;
+  });
+
+  emit?.(
+    { volume: 0.25 },
+    {
+      type: 'volumechange',
+      detail: { muted: false, volume: 0.25 },
+      origin: 'provider'
+    }
+  );
+
+  expect(observedVolume).toBe(0.25);
 });
