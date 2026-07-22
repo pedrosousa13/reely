@@ -4,6 +4,7 @@
     { "path": "./packages/core" },
     { "path": "./packages/provider-native" },
     { "path": "./packages/react" },
+    { "path": "./packages/react/tsconfig.test.json" },
     { "path": "./apps/docs" }
   ]
 }
