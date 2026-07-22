@@ -1,6 +1,7 @@
 packages:
   - packages/*
   - apps/*
+  - tests/integrations/*
 minimumReleaseAgeExclude:
   - '@vitejs/plugin-react@6.0.4'
   - react-dom@19.2.8

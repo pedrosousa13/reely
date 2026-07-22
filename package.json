@@ -7,13 +7,13 @@
     "node": "^20.19.0 || >=22.12.0"
   },
   "scripts": {
-    "format": "prettier --write .",
-    "format:check": "prettier --check .",
-    "lint": "eslint .",
+    "format": "prettier --write . --ignore-path .gitignore --ignore-path .prettierignore --ignore-path tests/integrations/next-image/.prettierignore",
+    "format:check": "prettier --check . --ignore-path .gitignore --ignore-path .prettierignore --ignore-path tests/integrations/next-image/.prettierignore",
+    "lint": "eslint . --ignore-pattern '**/.next/**'",
     "typecheck": "tsc -b",
     "test": "vitest run --passWithNoTests",
     "test:e2e": "pnpm --filter @reely/docs build && playwright test",
-    "test:integrations": "node -e \"console.log('Integration tests are a Task 3 placeholder.')\"",
+    "test:integrations": "pnpm --filter @reely/react build && pnpm --filter @reely/integration-next-image build && pnpm --filter @reely/integration-next-image test:integration",
     "test:packages": "pnpm --filter @reely/core build && pnpm --filter @reely/provider-native build && pnpm --filter @reely/react build",
     "test:bundle": "node -e \"console.log('Bundle tests are a Task 5 placeholder.')\"",
     "build": "pnpm -r --if-present run build"
