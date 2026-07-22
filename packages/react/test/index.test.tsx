@@ -1,5 +1,8 @@
+// @vitest-environment happy-dom
+
 import * as process from 'node:process';
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { createRef } from 'react';
 import { afterEach, expect, test, vi } from 'vitest';
 import * as Player from '../src/index';
 
@@ -98,3 +101,59 @@ test.each([
     ).toBe('paused');
   }
 );
+
+test('exposes stable actions and a ref handle backed by the Root controller', () => {
+  const handle = createRef<Player.PlayerHandle>();
+  const actionReferences: unknown[] = [];
+  const Probe = () => {
+    actionReferences.push(Player.usePlayerActions());
+    Player.usePlayerState((state) => state.playback);
+    return null;
+  };
+  const player = () => (
+    <Player.Root ref={handle} source="/tracer.mp4">
+      <Player.Media />
+      <Probe />
+    </Player.Root>
+  );
+  const { rerender } = render(player());
+
+  rerender(player());
+
+  expect(actionReferences).toHaveLength(2);
+  expect(actionReferences[0]).toBe(actionReferences[1]);
+  expect(handle.current).toMatchObject({
+    getState: expect.any(Function),
+    play: expect.any(Function)
+  });
+});
+
+test('throws a clear error when player hooks are used outside Root', () => {
+  const Probe = () => {
+    Player.usePlayerState((state) => state.playback);
+    return null;
+  };
+
+  expect(() => render(<Probe />)).toThrow(/inside Player.Root/i);
+});
+
+test('does not rerender a selector when an unrelated confirmed state changes', () => {
+  let renders = 0;
+  const Volume = () => {
+    Player.usePlayerState((state) => state.volume);
+    renders += 1;
+    return null;
+  };
+
+  render(
+    <Player.Root source="/tracer.mp4">
+      <Player.Media />
+      <Volume />
+    </Player.Root>
+  );
+  const initialRenders = renders;
+
+  fireEvent.play(screen.getByLabelText('Reely media'));
+
+  expect(renders).toBe(initialRenders);
+});
