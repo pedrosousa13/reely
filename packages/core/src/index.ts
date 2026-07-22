@@ -116,22 +116,20 @@ const isVimeoHost = (hostname: string): boolean =>
 const sourceFromYouTubeUrl = (url: URL): YouTubeSource | undefined => {
   if (!isYouTubeHost(url.hostname)) return undefined;
 
-  const segments = url.pathname.split('/').filter(Boolean);
   const isShortUrl =
     url.hostname === 'youtu.be' || url.hostname === 'www.youtu.be';
   const watchVideoIds = url.searchParams.getAll('v');
+  const shortUrlMatch = /^\/([A-Za-z0-9_-]+)$/.exec(url.pathname);
+  const embeddedVideoMatch = /^\/(?:embed|shorts)\/([A-Za-z0-9_-]+)$/.exec(
+    url.pathname
+  );
   const videoId = isShortUrl
-    ? segments.length === 1
-      ? segments[0]
-      : undefined
-    : segments[0] === 'watch' && segments.length === 1
+    ? shortUrlMatch?.[1]
+    : url.pathname === '/watch'
       ? watchVideoIds.length === 1
         ? watchVideoIds[0]
         : undefined
-      : (segments[0] === 'embed' || segments[0] === 'shorts') &&
-          segments.length === 2
-        ? segments[1]
-        : undefined;
+      : embeddedVideoMatch?.[1];
 
   return isYouTubeVideoId(videoId) ? { type: 'youtube', videoId } : undefined;
 };
@@ -139,18 +137,13 @@ const sourceFromYouTubeUrl = (url: URL): YouTubeSource | undefined => {
 const sourceFromVimeoUrl = (url: URL): VimeoSource | undefined => {
   if (!isVimeoHost(url.hostname)) return undefined;
 
-  const segments = url.pathname.split('/').filter(Boolean);
   const isPlayerUrl = url.hostname === 'player.vimeo.com';
-  const videoId = isPlayerUrl
-    ? segments[0] === 'video' &&
-      (segments.length === 2 || segments.length === 3)
-      ? segments[1]
-      : undefined
-    : segments.length === 1
-      ? segments[0]
-      : undefined;
-  const pathHash =
-    isPlayerUrl && segments.length === 3 ? segments[2] : undefined;
+  const playerMatch = /^\/video\/(\d+)(?:\/([A-Za-z0-9]+))?$/.exec(
+    url.pathname
+  );
+  const canonicalMatch = /^\/(\d+)$/.exec(url.pathname);
+  const videoId = isPlayerUrl ? playerMatch?.[1] : canonicalMatch?.[1];
+  const pathHash = isPlayerUrl ? playerMatch?.[2] : undefined;
   const queryHashes = url.searchParams.getAll('h');
   const queryHash = queryHashes.length === 1 ? queryHashes[0] : undefined;
 

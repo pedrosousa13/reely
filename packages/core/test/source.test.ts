@@ -131,11 +131,15 @@ test.each([
   'https://www.youtube.com/embed/dQw4w9WgXcQ/ignored',
   'https://www.youtube.com/shorts/dQw4w9WgXcQ/ignored',
   'https://youtu.be/dQw4w9WgXcQ/ignored',
+  'https://youtube.com//embed//abc123',
+  'https://youtu.be//abc123',
   'https://www.youtube.com/embed/%zz',
   'https://player.vimeo.com/123456789',
   'https://vimeo.com/video/123456789',
   'https://vimeo.com/123456789/ignored',
+  'https://vimeo.com//123456789',
   'https://player.vimeo.com/video/123456789/pathhash/ignored',
+  'https://player.vimeo.com//video//123456789//privatehash',
   'https://player.vimeo.com/video/123456789/%zz'
 ])('rejects malformed provider strings: %s', (input) => {
   expect(detectSource(input)).toMatchObject({
