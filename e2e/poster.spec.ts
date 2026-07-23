@@ -1,5 +1,5 @@
 import { expect, test, type Locator, type Page } from '@playwright/test';
-import { readdirSync, readFileSync } from 'node:fs';
+import { readdirSync, readFileSync, type Dirent } from 'node:fs';
 import { extname, join } from 'node:path';
 
 type Rectangle = {
@@ -28,19 +28,17 @@ const ignoredSourceDirectories = new Set([
   'node_modules',
   'test'
 ]);
+const isIgnoredSourceEntry = (entry: Dirent): boolean =>
+  entry.name.startsWith('.') ||
+  entry.name.includes('.test.') ||
+  entry.isSymbolicLink() ||
+  (entry.isDirectory() && ignoredSourceDirectories.has(entry.name));
 const visualSourceFiles = (directory: string): string[] =>
   readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
+    if (isIgnoredSourceEntry(entry)) return [];
     const path = join(directory, entry.name);
-    if (entry.isDirectory()) {
-      return entry.name.startsWith('.') ||
-        ignoredSourceDirectories.has(entry.name)
-        ? []
-        : visualSourceFiles(path);
-    }
-    return visualSourceExtensions.has(extname(entry.name)) &&
-      !entry.name.includes('.test.')
-      ? [path]
-      : [];
+    if (entry.isDirectory()) return visualSourceFiles(path);
+    return visualSourceExtensions.has(extname(entry.name)) ? [path] : [];
   });
 
 const expectMatchingRectangles = async (page: Page) => {
@@ -143,9 +141,19 @@ test('hides the poster after the first frame without changing its geometry', asy
 });
 
 test('visual source files do not declare background images', () => {
-  for (const file of ['apps', 'packages'].flatMap(visualSourceFiles)) {
-    expect(readFileSync(file, 'utf8'), file).not.toMatch(
-      /background-image|backgroundImage/
+  const forbiddenPattern = /background-image|backgroundImage/g;
+  const violations = ['apps', 'packages']
+    .flatMap(visualSourceFiles)
+    .flatMap((file) =>
+      readFileSync(file, 'utf8')
+        .split(/\r?\n/)
+        .flatMap((line, index) =>
+          Array.from(
+            line.matchAll(forbiddenPattern),
+            (match) => `${file}:${index + 1}: ${match[0]}`
+          )
+        )
     );
-  }
+
+  expect(violations, violations.join('\n')).toEqual([]);
 });
