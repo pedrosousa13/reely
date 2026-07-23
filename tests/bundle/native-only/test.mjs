@@ -133,6 +133,11 @@ const isYouTubeHost = (hostname) =>
   youtubeDomains.some(
     (domain) => hostname === domain || hostname.endsWith(`.${domain}`)
   );
+const vimeoDomains = ['vimeo.com', 'vimeocdn.com'];
+const isVimeoHost = (hostname) =>
+  vimeoDomains.some(
+    (domain) => hostname === domain || hostname.endsWith(`.${domain}`)
+  );
 const requestedScripts = [];
 const requestedUrls = [];
 let browser;
@@ -210,6 +215,12 @@ try {
   if (youtubeRequest) {
     throw new Error(
       `The native fixture contacted a YouTube domain: ${youtubeRequest.href}`
+    );
+  }
+  const vimeoRequest = requestedUrls.find((url) => isVimeoHost(url.hostname));
+  if (vimeoRequest) {
+    throw new Error(
+      `The native fixture contacted a Vimeo domain: ${vimeoRequest.href}`
     );
   }
 } finally {
