@@ -3,7 +3,7 @@ import { expect, test } from '@playwright/test';
 test('muted autoplay reaches a confirmed started state', async ({ page }) => {
   await page.goto('/?autoplay=muted');
 
-  const button = page.getByRole('button');
+  const button = page.locator('[data-autoplay-state]');
   await expect(button).toHaveAttribute('data-autoplay-state', 'started');
   await expect(page.getByLabel('Reely media')).toHaveJSProperty('muted', true);
 });

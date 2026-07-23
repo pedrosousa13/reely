@@ -16,6 +16,29 @@ const unsupported: Availability = {
   status: 'unavailable',
   reason: 'browser'
 };
+const policyDisallowed: Availability = {
+  status: 'unavailable',
+  reason: 'policy'
+};
+const notReady: Availability = { status: 'unknown', reason: 'not-ready' };
+
+// HTMLMediaElement.HAVE_METADATA, inlined because some DOM test environments
+// omit the static readyState constants.
+const HAVE_METADATA = 1;
+
+type WebKitPresentationMode = 'inline' | 'picture-in-picture' | 'fullscreen';
+
+type WebKitHTMLVideoElement = HTMLVideoElement & {
+  readonly webkitSupportsFullscreen?: boolean;
+  readonly webkitDisplayingFullscreen?: boolean;
+  readonly webkitEnterFullscreen?: () => void;
+  readonly webkitExitFullscreen?: () => void;
+  readonly webkitSupportsPresentationMode?: (
+    mode: WebKitPresentationMode
+  ) => boolean;
+  readonly webkitSetPresentationMode?: (mode: WebKitPresentationMode) => void;
+  readonly webkitPresentationMode?: WebKitPresentationMode;
+};
 
 export type NativePlaybackOptions = {
   readonly loop?: boolean;
@@ -82,6 +105,19 @@ const errorString = (cause: unknown, property: 'message' | 'name') => {
     return undefined;
   }
 };
+
+const policyBlocked = (
+  message: string
+): Exclude<CommandResult, { ok: true }> => ({
+  ok: false,
+  reason: 'blocked',
+  error: {
+    category: 'policy',
+    fatal: false,
+    recoverable: true,
+    message
+  }
+});
 
 const commandError = (cause: unknown): Exclude<CommandResult, { ok: true }> => {
   const blocked = errorString(cause, 'name') === 'NotAllowedError';
@@ -156,6 +192,7 @@ export const createNativeProvider = (
 ): NativeProviderAdapter => {
   const listeners = new Set<ProviderStateListener>();
   const ownerDocument = media.ownerDocument;
+  const webkitMedia: WebKitHTMLVideoElement = media;
   const startTime =
     Number.isFinite(options.startTime) && (options.startTime ?? 0) > 0
       ? (options.startTime ?? 0)
@@ -189,6 +226,34 @@ export const createNativeProvider = (
     originalEvent
   });
 
+  const fullscreenAvailability = (): Availability => {
+    if (typeof media.requestFullscreen === 'function') {
+      return ownerDocument.fullscreenEnabled === false
+        ? policyDisallowed
+        : available;
+    }
+    if (typeof webkitMedia.webkitEnterFullscreen === 'function') {
+      if (webkitMedia.webkitSupportsFullscreen === true) return available;
+      return media.readyState >= HAVE_METADATA ? unsupported : notReady;
+    }
+    return unsupported;
+  };
+
+  const supportsWebKitPictureInPicture = (): boolean =>
+    typeof webkitMedia.webkitSetPresentationMode === 'function' &&
+    typeof webkitMedia.webkitSupportsPresentationMode === 'function' &&
+    webkitMedia.webkitSupportsPresentationMode('picture-in-picture') === true;
+
+  const pictureInPictureAvailability = (): Availability => {
+    if (media.disablePictureInPicture === true) return policyDisallowed;
+    if (typeof media.requestPictureInPicture === 'function') {
+      return ownerDocument.pictureInPictureEnabled === false
+        ? policyDisallowed
+        : available;
+    }
+    return supportsWebKitPictureInPicture() ? available : unsupported;
+  };
+
   const emitMediaState = (originalEvent?: Event): void =>
     emit(
       {
@@ -213,14 +278,8 @@ export const createNativeProvider = (
           setPlaybackRate: available,
           selectQuality: { status: 'unknown', reason: 'provider-check' },
           selectTextTrack: { status: 'unavailable', reason: 'provider' },
-          fullscreen:
-            typeof media.requestFullscreen === 'function'
-              ? available
-              : unsupported,
-          pictureInPicture:
-            typeof media.requestPictureInPicture === 'function'
-              ? available
-              : unsupported,
+          fullscreen: fullscreenAvailability(),
+          pictureInPicture: pictureInPictureAvailability(),
           airPlay: { status: 'unknown', reason: 'provider-check' },
           customControls: available
         }
@@ -403,6 +462,24 @@ export const createNativeProvider = (
         pictureInPicture: ownerDocument.pictureInPictureElement === media
       })
     );
+  const onWebKitFullscreenChange = (originalEvent: Event): void => {
+    const fullscreen = originalEvent.type === 'webkitbeginfullscreen';
+    emit(
+      { fullscreen },
+      event('fullscreenchange', originalEvent, { fullscreen })
+    );
+  };
+  // Only picture-in-picture state is derived here; fullscreen presentation
+  // mode transitions rely on webkitbeginfullscreen/webkitendfullscreen,
+  // which Safari fires alongside this event.
+  const onWebKitPresentationModeChange = (originalEvent: Event): void => {
+    const pictureInPicture =
+      webkitMedia.webkitPresentationMode === 'picture-in-picture';
+    emit(
+      { pictureInPicture },
+      event('pictureinpicturechange', originalEvent, { pictureInPicture })
+    );
+  };
 
   const addListeners = (): void => {
     media.addEventListener('play', onPlay);
@@ -422,6 +499,12 @@ export const createNativeProvider = (
     ownerDocument.addEventListener('fullscreenchange', onFullscreenChange);
     media.addEventListener('enterpictureinpicture', onPictureInPictureChange);
     media.addEventListener('leavepictureinpicture', onPictureInPictureChange);
+    media.addEventListener('webkitbeginfullscreen', onWebKitFullscreenChange);
+    media.addEventListener('webkitendfullscreen', onWebKitFullscreenChange);
+    media.addEventListener(
+      'webkitpresentationmodechanged',
+      onWebKitPresentationModeChange
+    );
   };
 
   const removeListeners = (): void => {
@@ -447,6 +530,15 @@ export const createNativeProvider = (
     media.removeEventListener(
       'leavepictureinpicture',
       onPictureInPictureChange
+    );
+    media.removeEventListener(
+      'webkitbeginfullscreen',
+      onWebKitFullscreenChange
+    );
+    media.removeEventListener('webkitendfullscreen', onWebKitFullscreenChange);
+    media.removeEventListener(
+      'webkitpresentationmodechanged',
+      onWebKitPresentationModeChange
     );
   };
 
@@ -552,45 +644,78 @@ export const createNativeProvider = (
       });
     },
     requestFullscreen: async () => {
-      if (!media.requestFullscreen) return { ok: false, reason: 'unsupported' };
-      try {
-        await media.requestFullscreen();
-        return { ok: true };
-      } catch (cause) {
-        return commandError(cause);
+      if (typeof media.requestFullscreen === 'function') {
+        if (ownerDocument.fullscreenEnabled === false) {
+          return policyBlocked(
+            'Fullscreen is disallowed by the document permissions policy.'
+          );
+        }
+        return runCommand(() => media.requestFullscreen());
       }
+      const enterWebKitFullscreen = webkitMedia.webkitEnterFullscreen;
+      if (typeof enterWebKitFullscreen !== 'function')
+        return { ok: false, reason: 'unsupported' };
+      if (webkitMedia.webkitSupportsFullscreen !== true) {
+        return media.readyState >= HAVE_METADATA
+          ? { ok: false, reason: 'unsupported' }
+          : { ok: false, reason: 'not-ready' };
+      }
+      return runCommand(() => enterWebKitFullscreen.call(media));
     },
     exitFullscreen: async () => {
-      if (ownerDocument.fullscreenElement !== media) return { ok: true };
-      if (!ownerDocument.exitFullscreen)
-        return { ok: false, reason: 'unsupported' };
-      try {
-        await ownerDocument.exitFullscreen();
-        return { ok: true };
-      } catch (cause) {
-        return commandError(cause);
+      // Standard fullscreen first: Blink still ships the legacy WebKit video
+      // fullscreen properties, so webkitDisplayingFullscreen is also true
+      // after a standard requestFullscreen there.
+      if (ownerDocument.fullscreenElement === media) {
+        if (!ownerDocument.exitFullscreen)
+          return { ok: false, reason: 'unsupported' };
+        return runCommand(() => ownerDocument.exitFullscreen());
       }
+      if (webkitMedia.webkitDisplayingFullscreen === true) {
+        const exitWebKitFullscreen = webkitMedia.webkitExitFullscreen;
+        if (typeof exitWebKitFullscreen !== 'function')
+          return { ok: false, reason: 'unsupported' };
+        return runCommand(() => exitWebKitFullscreen.call(media));
+      }
+      return { ok: true };
     },
     requestPictureInPicture: async () => {
-      if (!media.requestPictureInPicture)
-        return { ok: false, reason: 'unsupported' };
-      try {
-        await media.requestPictureInPicture();
-        return { ok: true };
-      } catch (cause) {
-        return commandError(cause);
+      if (media.disablePictureInPicture === true) {
+        return policyBlocked(
+          'Picture-in-picture is disabled on this media element.'
+        );
       }
+      if (typeof media.requestPictureInPicture === 'function') {
+        if (ownerDocument.pictureInPictureEnabled === false) {
+          return policyBlocked(
+            'Picture-in-picture is disallowed by the document permissions policy.'
+          );
+        }
+        return runCommand(() => media.requestPictureInPicture());
+      }
+      const setPresentationMode = webkitMedia.webkitSetPresentationMode;
+      if (
+        typeof setPresentationMode !== 'function' ||
+        !supportsWebKitPictureInPicture()
+      ) {
+        return { ok: false, reason: 'unsupported' };
+      }
+      return runCommand(() =>
+        setPresentationMode.call(media, 'picture-in-picture')
+      );
     },
     exitPictureInPicture: async () => {
+      const setPresentationMode = webkitMedia.webkitSetPresentationMode;
+      if (
+        webkitMedia.webkitPresentationMode === 'picture-in-picture' &&
+        typeof setPresentationMode === 'function'
+      ) {
+        return runCommand(() => setPresentationMode.call(media, 'inline'));
+      }
       if (ownerDocument.pictureInPictureElement !== media) return { ok: true };
       if (!ownerDocument.exitPictureInPicture)
         return { ok: false, reason: 'unsupported' };
-      try {
-        await ownerDocument.exitPictureInPicture();
-        return { ok: true };
-      } catch (cause) {
-        return commandError(cause);
-      }
+      return runCommand(() => ownerDocument.exitPictureInPicture());
     },
     retry: () => {
       ++replayGeneration;
