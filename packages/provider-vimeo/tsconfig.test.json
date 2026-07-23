@@ -6,12 +6,6 @@
     "types": ["node", "vitest/globals"],
     "tsBuildInfoFile": "dist/.tsbuildinfo.test"
   },
-  "references": [
-    { "path": "../core" },
-    { "path": "../provider-hls" },
-    { "path": "../provider-native" },
-    { "path": "../provider-vimeo" },
-    { "path": "../provider-youtube" }
-  ],
+  "references": [{ "path": "../core" }, { "path": "./tsconfig.json" }],
   "include": ["src", "test"]
 }

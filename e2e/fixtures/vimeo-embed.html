@@ -1,0 +1,173 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Fake Vimeo embed</title>
+    <style>
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+        background: #000;
+        color: #fff;
+        font-family: sans-serif;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="state" data-testid="fake-vimeo-embed">fake vimeo embed</div>
+    <script>
+      (() => {
+        const query = new URLSearchParams(window.location.search);
+        const state = {
+          playing: false,
+          currentTime: 0,
+          duration: 62,
+          muted: query.get('muted') === '1',
+          volume: 1,
+          playbackRate: 1,
+          enabledTrack: null,
+          textTracks: [
+            {
+              label: 'English',
+              language: 'en',
+              kind: 'subtitles',
+              mode: 'disabled'
+            }
+          ]
+        };
+        const post = (data) => window.parent.postMessage(data, '*');
+        const respond = (method, value) =>
+          post(value === undefined ? { method } : { method, value });
+        const emit = (event, data) =>
+          post(data === undefined ? { event } : { event, data });
+        const playbackData = () => ({
+          duration: state.duration,
+          percent: state.duration ? state.currentTime / state.duration : 0,
+          seconds: state.currentTime
+        });
+        const maybeCue = () => {
+          if (!state.enabledTrack) return;
+          emit('cuechange', {
+            label: 'English',
+            language: 'en',
+            kind: 'subtitles',
+            cues: [{ html: '<i>fake cue text</i>', text: 'fake cue text' }]
+          });
+        };
+        window.addEventListener('message', (messageEvent) => {
+          const data =
+            typeof messageEvent.data === 'string'
+              ? JSON.parse(messageEvent.data)
+              : messageEvent.data;
+          if (!data || typeof data.method !== 'string') return;
+          const method = data.method;
+          const value = data.value;
+          switch (method) {
+            case 'ping':
+              respond('ping');
+              break;
+            case 'addEventListener':
+            case 'removeEventListener':
+              break;
+            case 'play':
+              respond('play');
+              state.playing = true;
+              emit('play', playbackData());
+              emit('playing', playbackData());
+              break;
+            case 'pause':
+              respond('pause');
+              state.playing = false;
+              emit('pause', playbackData());
+              break;
+            case 'getDuration':
+              respond('getDuration', state.duration);
+              break;
+            case 'getCurrentTime':
+              respond('getCurrentTime', state.currentTime);
+              break;
+            case 'setCurrentTime':
+              state.currentTime = value;
+              respond('setCurrentTime', value);
+              emit('seeking', playbackData());
+              emit('seeked', playbackData());
+              emit('timeupdate', playbackData());
+              maybeCue();
+              break;
+            case 'getMuted':
+              respond('getMuted', state.muted);
+              break;
+            case 'setMuted':
+              state.muted = Boolean(value);
+              respond('setMuted', state.muted);
+              emit('volumechange', {
+                volume: state.muted ? 0 : state.volume
+              });
+              break;
+            case 'getVolume':
+              respond('getVolume', state.volume);
+              break;
+            case 'setVolume':
+              state.volume = value;
+              respond('setVolume', value);
+              emit('volumechange', { volume: value });
+              break;
+            case 'getPlaybackRate':
+              respond('getPlaybackRate', state.playbackRate);
+              break;
+            case 'setPlaybackRate':
+              state.playbackRate = value;
+              respond('setPlaybackRate', value);
+              emit('playbackratechange', { playbackRate: value });
+              break;
+            case 'getTextTracks':
+              respond('getTextTracks', state.textTracks);
+              break;
+            case 'enableTextTrack':
+              state.enabledTrack = value;
+              respond('enableTextTrack', {
+                language: value.language,
+                kind: value.kind || 'subtitles',
+                showing: true
+              });
+              emit('texttrackchange', {
+                label: 'English',
+                language: value.language,
+                kind: value.kind || 'subtitles'
+              });
+              maybeCue();
+              break;
+            case 'disableTextTrack':
+              state.enabledTrack = null;
+              respond('disableTextTrack');
+              emit('texttrackchange', {
+                label: null,
+                language: null,
+                kind: null
+              });
+              break;
+            case 'requestFullscreen':
+              respond('requestFullscreen');
+              emit('fullscreenchange', { fullscreen: true });
+              break;
+            case 'exitFullscreen':
+              respond('exitFullscreen');
+              emit('fullscreenchange', { fullscreen: false });
+              break;
+            case 'getFullscreen':
+              respond('getFullscreen', false);
+              break;
+            case 'getPictureInPicture':
+              respond('getPictureInPicture', false);
+              break;
+            default:
+              // Answer everything else so SDK promises never hang.
+              respond(method, null);
+          }
+        });
+        emit('ready');
+      })();
+    </script>
+  </body>
+</html>

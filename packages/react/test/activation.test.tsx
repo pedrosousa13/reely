@@ -1178,7 +1178,7 @@ test('reconciles controlled volume and playback rate before pending provider ins
   const media = firstRequestedVideo();
   expect(media).toMatchObject({ playbackRate: 1.25, volume: 0.25 });
   let preferencesAtAttach:
-    { readonly playbackRate: number; readonly volume: number } | undefined;
+    { readonly playbackRate?: number; readonly volume?: number } | undefined;
   const fake = createFakeProvider({
     onAttach: () => {
       preferencesAtAttach = media

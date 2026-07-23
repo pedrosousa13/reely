@@ -1,0 +1,63 @@
+// @vitest-environment happy-dom
+
+import { expect, test, vi } from 'vitest';
+import type { ResolvedPlayerSource } from '@reely/core';
+import { loadProvider } from '../src/provider-loaders';
+
+vi.mock('@reely/provider-native', () => ({
+  createNativeProvider: vi.fn(() => ({ provider: 'native' }))
+}));
+
+vi.mock('@reely/provider-vimeo', () => ({
+  createVimeoProvider: vi.fn(() => ({ provider: 'vimeo' }))
+}));
+
+const nativeOptions = {};
+
+test('dispatches vimeo sources to the vimeo adapter with the mount and source', async () => {
+  const { createVimeoProvider } = await import('@reely/provider-vimeo');
+  const media = document.createElement('div');
+  const source = {
+    type: 'vimeo',
+    videoId: '76979871',
+    hash: 'abc123'
+  } as const;
+
+  await expect(
+    loadProvider({ media, nativeOptions, source })
+  ).resolves.toMatchObject({ provider: 'vimeo' });
+  expect(createVimeoProvider).toHaveBeenCalledWith(media, source);
+});
+
+test('rejects vimeo sources without a media mount', async () => {
+  await expect(
+    loadProvider({
+      media: null,
+      nativeOptions,
+      source: { type: 'vimeo', videoId: '76979871' }
+    })
+  ).rejects.toThrow('The Vimeo provider requires a media mount.');
+});
+
+test('requires a video element for native sources', async () => {
+  await expect(
+    loadProvider({
+      media: document.createElement('div'),
+      nativeOptions,
+      source: {
+        type: 'video',
+        sources: [{ src: '/tracer.mp4', mimeType: 'video/mp4' }]
+      }
+    })
+  ).rejects.toThrow('The native provider requires a media mount.');
+});
+
+test('reports source types without an installed adapter', async () => {
+  await expect(
+    loadProvider({
+      media: null,
+      nativeOptions,
+      source: { type: 'unknown-provider' } as unknown as ResolvedPlayerSource
+    })
+  ).rejects.toThrow('No provider adapter is installed for unknown-provider.');
+});

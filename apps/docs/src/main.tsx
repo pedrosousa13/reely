@@ -2,6 +2,12 @@ import { useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import * as Player from '@reely/react';
 
+declare global {
+  interface Window {
+    reelyHandle?: Player.PlayerHandle;
+  }
+}
+
 const parameters = new URLSearchParams(window.location.search);
 const autoplayParameter = parameters.get('autoplay');
 const autoplay: Player.RootProps['autoplay'] =
@@ -30,16 +36,27 @@ const hlsEngine: 'auto' | 'native' | 'hls.js' =
     ? engineParameter
     : 'auto';
 const youtubeExampleUrl = 'https://www.youtube.com/watch?v=M7lc1UVf-VE';
+const vimeoExampleUrl = 'https://vimeo.com/76979871';
+const sourceParameter = parameters.get('source');
+const vimeoSource: Player.RootProps['source'] | null =
+  sourceParameter === 'vimeo'
+    ? vimeoExampleUrl
+    : sourceParameter === 'vimeo-unlisted'
+      ? 'https://player.vimeo.com/video/76979871/abc123hash'
+      : sourceParameter?.startsWith('https://')
+        ? sourceParameter
+        : null;
 const activationSource: Player.RootProps['source'] =
-  parameters.get('source') === 'hls'
+  sourceParameter === 'hls'
     ? { type: 'hls', src: '/hls/master.m3u8', engine: hlsEngine }
-    : sourceChange
-      ? 'https://provider.invalid/source-a.mp4'
-      : parameters.get('activationSource') === 'external'
-        ? 'https://provider.invalid/tracer.mp4'
-        : parameters.get('activationSource') === 'youtube'
-          ? youtubeExampleUrl
-          : '/tracer.mp4';
+    : (vimeoSource ??
+      (sourceChange
+        ? 'https://provider.invalid/source-a.mp4'
+        : parameters.get('activationSource') === 'external'
+          ? 'https://provider.invalid/tracer.mp4'
+          : parameters.get('activationSource') === 'youtube'
+            ? youtubeExampleUrl
+            : '/tracer.mp4'));
 const replacementSource = sourceChange
   ? 'https://provider.invalid/source-b.mp4'
   : null;
@@ -134,6 +151,9 @@ const PlayerFixture = () => {
         defaultMuted={defaultMuted}
         loading={loading}
         preload={preload}
+        ref={(handle) => {
+          window.reelyHandle = handle ?? undefined;
+        }}
         source={source}
       >
         <Player.Viewport
@@ -279,9 +299,9 @@ const App = () => (
     <p>
       <code>Player.Root</code> accepts MP4, WebM, HLS, YouTube, and Vimeo
       strings, or an explicit source object. The native tracer above remains a
-      working MP4 example. HLS VOD sources load through the HLS provider and
-      YouTube sources through the YouTube iframe player; Vimeo sources are
-      detected but not loaded yet.
+      working MP4 example. HLS VOD sources load through the HLS provider,
+      YouTube sources through the YouTube iframe player, and Vimeo sources
+      through the Vimeo iframe embed.
     </p>
     <h2>HLS</h2>
     <p>
@@ -457,6 +477,44 @@ await selectQuality(null) // back to automatic adaptation`}</pre>
         events), so <code>currentTime</code> advances in coarse steps.
       </li>
     </ul>
+    <h2>Vimeo</h2>
+    <p>
+      A Vimeo source lazily loads <code>@reely/provider-vimeo</code> and the
+      official Vimeo Player SDK, then mounts a chromeless (
+      <code>controls=0</code>), Do-Not-Track (<code>dnt=1</code>) iframe embed.
+      No Vimeo domain is contacted before activation. Try{' '}
+      <code>?source=vimeo</code> on this page.
+    </p>
+    <pre>{`<Player.Root source="https://vimeo.com/76979871">
+  <Player.Viewport>
+    <Player.Poster>{poster}</Player.Poster>
+    <Player.Media />
+  </Player.Viewport>
+</Player.Root>`}</pre>
+    <p>
+      <strong>Plan-dependent controls.</strong> Hiding Vimeo&apos;s own controls
+      is gated by the video owner&apos;s Vimeo plan; free-plan videos ignore{' '}
+      <code>controls=0</code>. Reely reports this through{' '}
+      <code>capabilities.customControls</code>: <code>available</code> when the
+      chromeless embed is honored, <code>unavailable</code> with reason{' '}
+      <code>provider-plan</code> when Vimeo&apos;s controls stay, or{' '}
+      <code>unknown</code> when the plan cannot be resolved. When gated,
+      Vimeo&apos;s controls remain the single control layer; hide custom
+      controls instead of stacking a second layer on top.
+    </p>
+    <p>
+      <strong>Cross-origin styling limits.</strong> The Vimeo player renders
+      inside a cross-origin iframe. Reely can size and position the iframe box,
+      but the player UI inside it cannot be styled, themed, or inspected from
+      the embedding page.
+    </p>
+    <p>
+      <strong>Unlisted videos.</strong> Unlisted videos require their privacy
+      hash. Both URL forms carry it into the embed, or pass it explicitly:
+    </p>
+    <pre>{`<Player.Root source="https://player.vimeo.com/video/123456789/a1b2c3" />
+<Player.Root source="https://vimeo.com/123456789?h=a1b2c3" />
+<Player.Root source={{ type: 'vimeo', videoId: '123456789', hash: 'a1b2c3' }} />`}</pre>
     <h2>Playback API</h2>
     <p>
       Get a <code>PlayerHandle</code> from the <code>ref</code> prop on{' '}
