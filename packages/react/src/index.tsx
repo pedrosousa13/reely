@@ -1058,23 +1058,537 @@ export const PosterImage = ({
   /* eslint-enable react-hooks/refs */
 };
 
-export const PlayButton = () => {
-  const { autoplay, playback } = usePlayerState((state) => ({
+const controlTargetStyle: CSSProperties = { minWidth: 44, minHeight: 44 };
+
+const formatTime = (totalSeconds: number): string => {
+  const clamped = Math.max(0, Math.floor(totalSeconds));
+  const hours = Math.floor(clamped / 3600);
+  const minutes = Math.floor((clamped % 3600) / 60);
+  const seconds = clamped % 60;
+  const pad = (value: number): string => String(value).padStart(2, '0');
+  return hours > 0
+    ? `${hours}:${pad(minutes)}:${pad(seconds)}`
+    : `${minutes}:${pad(seconds)}`;
+};
+
+export type PlayButtonProps = ComponentPropsWithRef<'button'>;
+
+export const PlayButton = ({
+  children,
+  onClick,
+  style,
+  ...props
+}: PlayButtonProps) => {
+  const { autoplay, playback, provider } = usePlayerState((state) => ({
     autoplay: state.autoplay,
-    playback: state.playback
+    playback: state.playback,
+    provider: state.provider
   }));
   const { controller } = usePlayer();
   const isPlaying = playback === 'playing';
 
   return (
     <button
+      {...props}
       aria-label={isPlaying ? 'Pause' : 'Play'}
       data-autoplay-state={autoplay}
       data-playback-state={playback}
-      onClick={() => void controller.togglePlaybackWithOrigin('user')}
+      data-provider={provider ?? undefined}
+      data-reely-part="play-button"
+      data-state={playback}
+      onClick={(event) => {
+        onClick?.(event);
+        if (!event.defaultPrevented) {
+          void controller.togglePlaybackWithOrigin('user');
+        }
+      }}
+      style={{ ...controlTargetStyle, ...style }}
       type="button"
     >
-      {isPlaying ? 'Pause' : 'Play'}
+      {children ?? (isPlaying ? 'Pause' : 'Play')}
     </button>
+  );
+};
+
+export type MuteButtonProps = ComponentPropsWithRef<'button'>;
+
+export const MuteButton = ({
+  children,
+  onClick,
+  style,
+  ...props
+}: MuteButtonProps) => {
+  const { muted, provider, status } = usePlayerState((state) => ({
+    muted: state.muted,
+    provider: state.provider,
+    status: state.capabilities.setVolume.status
+  }));
+  const { controller } = usePlayer();
+  if (status !== 'available') return null;
+
+  return (
+    <button
+      {...props}
+      aria-label={muted ? 'Unmute' : 'Mute'}
+      aria-pressed={muted}
+      data-provider={provider ?? undefined}
+      data-reely-part="mute-button"
+      data-state={muted ? 'muted' : 'unmuted'}
+      onClick={(event) => {
+        onClick?.(event);
+        if (!event.defaultPrevented) void controller.toggleMuted();
+      }}
+      style={{ ...controlTargetStyle, ...style }}
+      type="button"
+    >
+      {children ?? (muted ? 'Unmute' : 'Mute')}
+    </button>
+  );
+};
+
+export type VolumeSliderProps = ComponentPropsWithRef<'input'>;
+
+export const VolumeSlider = ({
+  'aria-label': ariaLabel,
+  onChange,
+  step,
+  style,
+  ...props
+}: VolumeSliderProps) => {
+  const { muted, provider, status, volume } = usePlayerState((state) => ({
+    muted: state.muted,
+    provider: state.provider,
+    status: state.capabilities.setVolume.status,
+    volume: state.volume
+  }));
+  const { controller } = usePlayer();
+  if (status !== 'available') return null;
+  const value = muted ? 0 : volume;
+  const percent = Math.round(value * 100);
+
+  return (
+    <input
+      {...props}
+      aria-label={ariaLabel ?? 'Volume'}
+      aria-valuetext={`${percent}%`}
+      data-muted={muted ? '' : undefined}
+      data-provider={provider ?? undefined}
+      data-reely-part="volume-slider"
+      data-state={muted ? 'muted' : 'unmuted'}
+      max={1}
+      min={0}
+      onChange={(event) => {
+        onChange?.(event);
+        if (event.defaultPrevented) return;
+        const next = Number(event.currentTarget.value);
+        if (!Number.isFinite(next)) return;
+        if (muted && next > 0) void controller.unmute();
+        void controller.setVolume(next);
+      }}
+      step={step ?? 0.05}
+      style={{ ...controlTargetStyle, ...style }}
+      type="range"
+      value={value}
+    />
+  );
+};
+
+export type SeekSliderProps = ComponentPropsWithRef<'div'>;
+
+export const SeekSlider = ({ children, style, ...props }: SeekSliderProps) => {
+  const { buffered, currentTime, duration, provider, status } = usePlayerState(
+    (state) => ({
+      buffered: state.buffered,
+      currentTime: state.currentTime,
+      duration: state.duration,
+      provider: state.provider,
+      status: state.capabilities.seek.status
+    })
+  );
+  const { controller } = usePlayer();
+  if (status !== 'available') return null;
+  const hasDuration = typeof duration === 'number' && duration > 0;
+  const max = hasDuration ? duration : 0;
+  const value = hasDuration ? Math.min(currentTime, duration) : 0;
+
+  return (
+    <div
+      {...props}
+      data-provider={provider ?? undefined}
+      data-reely-part="seek-slider"
+      data-state={hasDuration ? 'ready' : 'idle'}
+      style={{ position: 'relative', minHeight: 44, ...style }}
+    >
+      <div aria-hidden="true" data-reely-part="seek-buffered">
+        {hasDuration
+          ? buffered.map((range, index) => (
+              <div
+                data-reely-part="seek-buffered-range"
+                key={`${range.start}:${range.end}:${index}`}
+                style={{
+                  position: 'absolute',
+                  left: `${(range.start / duration) * 100}%`,
+                  width: `${((range.end - range.start) / duration) * 100}%`
+                }}
+              />
+            ))
+          : null}
+      </div>
+      <input
+        aria-label="Seek"
+        aria-valuetext={
+          hasDuration
+            ? `${formatTime(value)} of ${formatTime(duration)}`
+            : formatTime(value)
+        }
+        data-reely-part="seek-slider-input"
+        max={max}
+        min={0}
+        onChange={(event) => {
+          const next = Number(event.currentTarget.value);
+          if (Number.isFinite(next)) void controller.seekTo(next);
+        }}
+        step={1}
+        type="range"
+        value={value}
+      />
+      {children}
+    </div>
+  );
+};
+
+export type TimeProps = ComponentPropsWithRef<'time'> & {
+  readonly type?: 'current' | 'duration' | 'remaining';
+};
+
+export const Time = ({ children, type = 'current', ...props }: TimeProps) => {
+  const { currentTime, duration } = usePlayerState((state) => ({
+    currentTime: state.currentTime,
+    duration: state.duration
+  }));
+  const hasDuration = typeof duration === 'number' && Number.isFinite(duration);
+  const seconds =
+    type === 'duration'
+      ? hasDuration
+        ? duration
+        : 0
+      : type === 'remaining'
+        ? hasDuration
+          ? Math.max(0, duration - currentTime)
+          : 0
+        : currentTime;
+  const formatted = formatTime(seconds);
+  const display =
+    type === 'remaining' && seconds > 0 ? `-${formatted}` : formatted;
+
+  return (
+    <time
+      {...props}
+      dateTime={`PT${Math.max(0, Math.floor(seconds))}S`}
+      data-reely-part="time"
+      data-time-type={type}
+    >
+      {children ?? display}
+    </time>
+  );
+};
+
+export type FullscreenButtonProps = ComponentPropsWithRef<'button'>;
+
+export const FullscreenButton = ({
+  children,
+  onClick,
+  style,
+  ...props
+}: FullscreenButtonProps) => {
+  const { fullscreen, provider, status } = usePlayerState((state) => ({
+    fullscreen: state.fullscreen,
+    provider: state.provider,
+    status: state.capabilities.fullscreen.status
+  }));
+  const { controller } = usePlayer();
+  if (status !== 'available') return null;
+
+  return (
+    <button
+      {...props}
+      aria-label={fullscreen ? 'Exit fullscreen' : 'Enter fullscreen'}
+      aria-pressed={fullscreen}
+      data-provider={provider ?? undefined}
+      data-reely-part="fullscreen-button"
+      data-state={fullscreen ? 'active' : 'inline'}
+      onClick={(event) => {
+        onClick?.(event);
+        if (event.defaultPrevented) return;
+        void (fullscreen
+          ? controller.exitFullscreen()
+          : controller.requestFullscreen());
+      }}
+      style={{ ...controlTargetStyle, ...style }}
+      type="button"
+    >
+      {children ?? (fullscreen ? 'Exit fullscreen' : 'Enter fullscreen')}
+    </button>
+  );
+};
+
+export type PipButtonProps = ComponentPropsWithRef<'button'>;
+
+export const PipButton = ({
+  children,
+  onClick,
+  style,
+  ...props
+}: PipButtonProps) => {
+  const { pictureInPicture, provider, status } = usePlayerState((state) => ({
+    pictureInPicture: state.pictureInPicture,
+    provider: state.provider,
+    status: state.capabilities.pictureInPicture.status
+  }));
+  const { controller } = usePlayer();
+  if (status !== 'available') return null;
+
+  return (
+    <button
+      {...props}
+      aria-label={
+        pictureInPicture
+          ? 'Exit picture-in-picture'
+          : 'Enter picture-in-picture'
+      }
+      aria-pressed={pictureInPicture}
+      data-provider={provider ?? undefined}
+      data-reely-part="pip-button"
+      data-state={pictureInPicture ? 'active' : 'inline'}
+      onClick={(event) => {
+        onClick?.(event);
+        if (event.defaultPrevented) return;
+        void (pictureInPicture
+          ? controller.exitPictureInPicture()
+          : controller.requestPictureInPicture());
+      }}
+      style={{ ...controlTargetStyle, ...style }}
+      type="button"
+    >
+      {children ??
+        (pictureInPicture
+          ? 'Exit picture-in-picture'
+          : 'Enter picture-in-picture')}
+    </button>
+  );
+};
+
+type ShortcutEvent = {
+  readonly key: string;
+  readonly altKey: boolean;
+  readonly ctrlKey: boolean;
+  readonly metaKey: boolean;
+  readonly target: EventTarget | null;
+  readonly defaultPrevented: boolean;
+  readonly preventDefault: () => void;
+};
+
+const isEditableTarget = (node: EventTarget | null): boolean => {
+  if (!(node instanceof HTMLElement)) return false;
+  const tag = node.tagName;
+  return (
+    tag === 'INPUT' ||
+    tag === 'TEXTAREA' ||
+    tag === 'SELECT' ||
+    node.isContentEditable
+  );
+};
+
+const isInOpenMenu = (node: EventTarget | null): boolean =>
+  node instanceof HTMLElement &&
+  node.closest(
+    '[role="menu"], [role="menubar"], [role="listbox"], [data-reely-menu="open"]'
+  ) !== null;
+
+const isNativeActivationTarget = (node: EventTarget | null): boolean =>
+  node instanceof HTMLElement &&
+  node.closest('button, [role="button"], a[href], summary') !== null;
+
+export type ControlsProps = ComponentPropsWithRef<'div'> & {
+  /**
+   * Attach the shortcut listener to the document instead of scoping it to
+   * this region. Global shortcuts are opt-in; by default keys only fire while
+   * focus is inside the controls region.
+   */
+  readonly global?: boolean;
+};
+
+export const Controls = ({
+  'aria-label': ariaLabel,
+  children,
+  global = false,
+  onBlur,
+  onFocus,
+  onKeyDown,
+  ref,
+  style,
+  tabIndex,
+  ...props
+}: ControlsProps) => {
+  const {
+    fullscreen,
+    fullscreenStatus,
+    muted,
+    seekStatus,
+    volume,
+    volumeStatus
+  } = usePlayerState((state) => ({
+    fullscreen: state.fullscreen,
+    fullscreenStatus: state.capabilities.fullscreen.status,
+    muted: state.muted,
+    seekStatus: state.capabilities.seek.status,
+    volume: state.volume,
+    volumeStatus: state.capabilities.setVolume.status
+  }));
+  const { controller } = usePlayer();
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const hadFocusWithin = useRef(false);
+
+  const handleShortcut = useCallback(
+    (event: ShortcutEvent) => {
+      if (event.defaultPrevented) return;
+      if (event.altKey || event.ctrlKey || event.metaKey) return;
+      const target = event.target;
+      if (isEditableTarget(target) || isInOpenMenu(target)) return;
+
+      switch (event.key) {
+        case ' ':
+        case 'k':
+        case 'K':
+          // Space natively activates a focused button; don't double-toggle.
+          if (event.key === ' ' && isNativeActivationTarget(target)) return;
+          event.preventDefault();
+          void controller.togglePlaybackWithOrigin('user');
+          return;
+        case 'ArrowLeft':
+          if (seekStatus !== 'available') return;
+          event.preventDefault();
+          void controller.seekBy(-5);
+          return;
+        case 'ArrowRight':
+          if (seekStatus !== 'available') return;
+          event.preventDefault();
+          void controller.seekBy(5);
+          return;
+        case 'j':
+        case 'J':
+          if (seekStatus !== 'available') return;
+          event.preventDefault();
+          void controller.seekBy(-10);
+          return;
+        case 'l':
+        case 'L':
+          if (seekStatus !== 'available') return;
+          event.preventDefault();
+          void controller.seekBy(10);
+          return;
+        case 'ArrowUp':
+        case 'ArrowDown': {
+          if (volumeStatus !== 'available') return;
+          event.preventDefault();
+          const delta = event.key === 'ArrowUp' ? 0.05 : -0.05;
+          const next = Math.min(
+            1,
+            Math.max(0, Math.round((volume + delta) * 100) / 100)
+          );
+          if (muted && next > 0) void controller.unmute();
+          void controller.setVolume(next);
+          return;
+        }
+        case 'm':
+        case 'M':
+          event.preventDefault();
+          void controller.toggleMuted();
+          return;
+        case 'f':
+        case 'F':
+          if (fullscreenStatus !== 'available') return;
+          event.preventDefault();
+          void (fullscreen
+            ? controller.exitFullscreen()
+            : controller.requestFullscreen());
+          return;
+        case 'c':
+        case 'C':
+          // Captions toggle is owned by the captions issue; the key is
+          // reserved here so the shortcut map stays complete.
+          return;
+        default:
+          return;
+      }
+    },
+    [
+      controller,
+      fullscreen,
+      fullscreenStatus,
+      muted,
+      seekStatus,
+      volume,
+      volumeStatus
+    ]
+  );
+
+  useEffect(() => {
+    if (!global) return;
+    const listener = (event: KeyboardEvent): void => handleShortcut(event);
+    document.addEventListener('keydown', listener);
+    return () => document.removeEventListener('keydown', listener);
+  }, [global, handleShortcut]);
+
+  // Keep focus inside the player region: when a capability-gated control
+  // unmounts while focused, the browser drops focus to <body>. Restore it to
+  // the region so keyboard users never lose their place.
+  useEffect(() => {
+    const node = containerRef.current;
+    if (!node) return;
+    if (hadFocusWithin.current && document.activeElement === document.body) {
+      node.focus();
+    }
+  });
+
+  const setRef = useCallback(
+    (node: HTMLDivElement | null) => {
+      containerRef.current = node;
+      assignRef(ref, node);
+    },
+    [ref]
+  );
+
+  return (
+    <div
+      {...props}
+      aria-label={ariaLabel ?? 'Video player controls'}
+      data-reely-part="controls"
+      onBlur={(event) => {
+        onBlur?.(event);
+        const next = event.relatedTarget as Node | null;
+        if (
+          next &&
+          containerRef.current &&
+          !containerRef.current.contains(next)
+        ) {
+          hadFocusWithin.current = false;
+        }
+      }}
+      onFocus={(event) => {
+        onFocus?.(event);
+        hadFocusWithin.current = true;
+      }}
+      onKeyDown={(event) => {
+        onKeyDown?.(event);
+        if (!global) handleShortcut(event);
+      }}
+      ref={setRef}
+      role="group"
+      style={style}
+      tabIndex={tabIndex ?? 0}
+    >
+      {children}
+    </div>
   );
 };
