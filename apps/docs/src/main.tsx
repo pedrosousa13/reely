@@ -163,6 +163,10 @@ const LiveControls = () => {
       state.seekable.length > 0
         ? Math.max(...state.seekable.map((range) => range.end))
         : null,
+    seekableStart:
+      state.seekable.length > 0
+        ? Math.min(...state.seekable.map((range) => range.start))
+        : null,
     seekStatus: state.capabilities.seek.status
   }));
   const actions = Player.usePlayerActions();
@@ -197,10 +201,15 @@ const LiveControls = () => {
         <>
           <button
             data-testid="live-seek-back"
-            onClick={() => void actions.seekBy(-5)}
+            onClick={() =>
+              void (
+                live.seekableStart !== null &&
+                actions.seekTo(live.seekableStart)
+              )
+            }
             type="button"
           >
-            Back 5s
+            Jump to start
           </button>{' '}
           <button
             data-testid="live-seek-edge"

@@ -13,7 +13,11 @@ import type { Connect, Plugin, PreviewServer, ViteDevServer } from 'vite';
 // is not an LL-HLS or DVR fixture.
 
 const SEGMENT_DURATION_SECONDS = 1;
-const WINDOW_SEGMENTS = 4;
+// A ~20s window: comfortably wider than the provider's 10s at-edge tolerance so
+// that a behind-live-edge state is actually reachable. On native HLS the
+// seekable range mirrors this playlist window directly, so it must exceed the
+// edge threshold for behind-edge seeking to be demonstrable.
+const WINDOW_SEGMENTS = 20;
 
 const SEGMENT_PATH = fileURLToPath(
   new URL('./public/hls/v0/seg_000.ts', import.meta.url)

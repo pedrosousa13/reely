@@ -46,20 +46,30 @@ test('surfaces a behind-edge seek within the live window on the hls.js engine', 
   page
 }) => {
   test.skip(browserName !== 'chromium', 'The hls.js flow runs on Chromium.');
+  // The window has to fill and settle at the live edge before a behind-edge
+  // seek is meaningful, which takes longer than the default per-test budget.
+  test.setTimeout(30_000);
 
   await page.goto('/?source=live&engine=hls.js');
   await expect(page.getByTestId('hls-engine')).toHaveText('hls.js');
 
   const panel = page.getByTestId('live-panel');
   await expect(panel).toHaveAttribute('data-live-status', 'live');
-  await page.getByRole('button', { name: 'Play' }).click();
 
-  // Seeking back stays inside the window and reads as behind the live edge.
+  // Once the buffer fills, hls.js parks the position at the live edge.
+  await expect(panel).toHaveAttribute('data-live-edge', 'at-edge', {
+    timeout: 15_000
+  });
+
+  // Jumping to the oldest available position stays inside the window and reads
+  // as behind the live edge.
   await page.getByTestId('live-seek-back').click();
   await expect(panel).toHaveAttribute('data-live-edge', 'behind-edge');
-  await expect(page.getByTestId('live-time')).not.toContainText('NaN');
+  const time = page.getByTestId('live-time');
+  await expect(time).not.toContainText('NaN');
+  await expect(time).toContainText('-');
 
-  // Jumping to the live edge returns to at-edge.
+  // Jumping back to the live edge returns to at-edge.
   await page.getByTestId('live-seek-edge').click();
   await expect(panel).toHaveAttribute('data-live-edge', 'at-edge');
 });
