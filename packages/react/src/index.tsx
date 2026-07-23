@@ -6,7 +6,11 @@ import {
   type PlayerState
 } from '@reely/core';
 import type { NativePlaybackOptions } from '@reely/provider-native';
-import { useActivation, type ActivationBindings } from './use-activation.js';
+import {
+  useActivation,
+  type ActivationBindings,
+  type PlayerMediaMount
+} from './use-activation.js';
 import {
   createContext,
   isValidElement,
@@ -105,7 +109,11 @@ export type PlayerHandle = Pick<
 
 export type PlayerActions = Omit<PlayerHandle, 'getState' | 'subscribe' | 'on'>;
 
-export type { PlayerLoadingStrategy, PlayerPreload } from './use-activation.js';
+export type {
+  PlayerLoadingStrategy,
+  PlayerMediaMount,
+  PlayerPreload
+} from './use-activation.js';
 
 export type PlayerActivationProps = {
   readonly loading?: import('./use-activation.js').PlayerLoadingStrategy;
@@ -283,13 +291,14 @@ export const Root = ({
 }: RootProps) => {
   const [controller] = useState(() => new PlayerController());
   const [hiddenTransition, setHiddenTransition] = useState<SourceTransition>();
-  const currentMedia = useRef<HTMLVideoElement | null>(null);
+  const currentMedia = useRef<PlayerMediaMount | null>(null);
   const providerSourceTransition = useRef<SourceTransition | undefined>(
     undefined
   );
   const loadedDataListener = useRef<
     { media: HTMLVideoElement; listener: () => void } | undefined
   >(undefined);
+  const embedPreferenceSeed = useRef<(() => void) | undefined>(undefined);
   const desiredMuted = useRef(muted ?? defaultMuted);
   const desiredVolume = useRef(volume ?? defaultVolume);
   const desiredPlaybackRate = useRef(playbackRate ?? defaultPlaybackRate);
@@ -478,12 +487,14 @@ export const Root = ({
       listener.media.removeEventListener('loadeddata', listener.listener);
       loadedDataListener.current = undefined;
     }
+    embedPreferenceSeed.current?.();
+    embedPreferenceSeed.current = undefined;
     currentMedia.current = null;
     providerSourceTransition.current = undefined;
   }, []);
 
   const prepareMedia = useCallback(
-    (media: HTMLVideoElement) => {
+    (media: PlayerMediaMount) => {
       detachPreparedMedia();
       currentMedia.current = media;
       providerSourceTransition.current = sourceTransition;
@@ -493,28 +504,82 @@ export const Root = ({
       supersededMuted.current.length = 0;
       supersededVolume.current.length = 0;
       supersededPlaybackRate.current.length = 0;
-      media.muted = controlledMuted.current ?? desiredMuted.current;
-      const nextVolume = controlledVolume.current ?? desiredVolume.current;
-      const nextPlaybackRate =
-        controlledPlaybackRate.current ?? desiredPlaybackRate.current;
-      if (Number.isFinite(nextVolume)) {
-        try {
-          media.volume = Math.min(1, Math.max(0, nextVolume));
-        } catch {
-          // Initial preference seeding must not escape the provider boundary.
+      if (media instanceof HTMLVideoElement) {
+        media.muted = controlledMuted.current ?? desiredMuted.current;
+        const nextVolume = controlledVolume.current ?? desiredVolume.current;
+        const nextPlaybackRate =
+          controlledPlaybackRate.current ?? desiredPlaybackRate.current;
+        if (Number.isFinite(nextVolume)) {
+          try {
+            media.volume = Math.min(1, Math.max(0, nextVolume));
+          } catch {
+            // Initial preference seeding must not escape the provider boundary.
+          }
         }
-      }
-      if (Number.isFinite(nextPlaybackRate) && nextPlaybackRate > 0) {
-        try {
-          media.playbackRate = nextPlaybackRate;
-        } catch {
-          // Initial preference seeding must not escape the provider boundary.
+        if (Number.isFinite(nextPlaybackRate) && nextPlaybackRate > 0) {
+          try {
+            media.playbackRate = nextPlaybackRate;
+          } catch {
+            // Initial preference seeding must not escape the provider boundary.
+          }
         }
       }
       ensurePreferenceSubscription();
       controller.configureAutoplay(autoplayConfiguration.current.autoplay, {
         controlledMuted: autoplayConfiguration.current.muted
       });
+      if (!(media instanceof HTMLVideoElement)) {
+        // Embed mounts have no seedable element properties, so replay the
+        // desired preferences through provider commands once the provider
+        // confirms ready state. No confirmed user change can land earlier:
+        // commands against a non-ready provider fail as not-ready.
+        const seedTransition = sourceTransition;
+        const subscription: { unsubscribe?: () => void } = {};
+        let disposed = false;
+        const dispose = (): void => {
+          if (disposed) return;
+          disposed = true;
+          subscription.unsubscribe?.();
+          if (embedPreferenceSeed.current === dispose) {
+            embedPreferenceSeed.current = undefined;
+          }
+        };
+        embedPreferenceSeed.current = dispose;
+        subscription.unsubscribe = controller.subscribe((state) => {
+          if (disposed) return;
+          if (
+            currentMedia.current !== media ||
+            providerSourceTransition.current !== seedTransition
+          ) {
+            dispose();
+            return;
+          }
+          if (state.lifecycle !== 'ready' || state.activation !== 'ready') {
+            return;
+          }
+          dispose();
+          const nextMuted = controlledMuted.current ?? desiredMuted.current;
+          const nextVolume = controlledVolume.current ?? desiredVolume.current;
+          const nextPlaybackRate =
+            controlledPlaybackRate.current ?? desiredPlaybackRate.current;
+          if (state.muted !== nextMuted) reconcileMuted(nextMuted);
+          if (Number.isFinite(nextVolume)) {
+            const boundedVolume = Math.min(1, Math.max(0, nextVolume));
+            if (!Object.is(state.volume, boundedVolume)) {
+              reconcileVolume(boundedVolume);
+            }
+          }
+          if (
+            Number.isFinite(nextPlaybackRate) &&
+            nextPlaybackRate > 0 &&
+            !Object.is(state.playbackRate, nextPlaybackRate)
+          ) {
+            reconcilePlaybackRate(nextPlaybackRate);
+          }
+        });
+        if (disposed) subscription.unsubscribe();
+        return;
+      }
       const attachedSourceTransition = sourceTransition;
       const onLoadedData = () => {
         if (
@@ -534,6 +599,9 @@ export const Root = ({
       controller,
       detachPreparedMedia,
       ensurePreferenceSubscription,
+      reconcileMuted,
+      reconcilePlaybackRate,
+      reconcileVolume,
       sourceTransition
     ]
   );
@@ -550,7 +618,7 @@ export const Root = ({
   });
   const registerActivationMedia = activation.registerMedia;
   const registerMedia = useCallback(
-    (media: HTMLVideoElement | null) => {
+    (media: PlayerMediaMount | null) => {
       if (!media) detachPreparedMedia();
       registerActivationMedia(media);
     },
@@ -720,11 +788,29 @@ const sourceKey = (source: ReturnType<typeof detectSource>): string =>
 
 export const Media = ({ nativePoster }: MediaProps) => {
   const { mediaEligible, preload, registerMedia, source } = usePlayer();
-  if (
-    !mediaEligible ||
-    source.status === 'failure' ||
-    (source.source.type !== 'video' && source.source.type !== 'hls')
-  ) {
+  if (!mediaEligible || source.status === 'failure') {
+    return null;
+  }
+
+  if (source.source.type === 'youtube') {
+    // A plain mount for the YouTube iframe. The provider chrome inside the
+    // iframe is the single control layer; Reely renders nothing over it.
+    return (
+      <div
+        data-reely-part="media"
+        key={sourceKey(source)}
+        ref={registerMedia}
+        style={{
+          position: 'relative',
+          zIndex: 0,
+          width: '100%',
+          height: '100%'
+        }}
+      />
+    );
+  }
+
+  if (source.source.type !== 'video' && source.source.type !== 'hls') {
     return null;
   }
 

@@ -15,8 +15,10 @@ const rect = async (locator: Locator): Promise<Rectangle> =>
     return { height, width, x, y };
   });
 
-const poster = (page: Page) => page.locator('[data-reely-part="poster"]');
-const viewport = (page: Page) => page.locator('[data-reely-part="viewport"]');
+// Scoped to the fixture player: the docs page also mounts the YouTube example.
+const viewport = (page: Page) => page.getByTestId('viewport');
+const poster = (page: Page) =>
+  viewport(page).locator('[data-reely-part="poster"]');
 const posterImage = (page: Page) =>
   page.locator('[data-reely-part="poster-image"]');
 

@@ -9,11 +9,6 @@
     "rootDir": "src",
     "tsBuildInfoFile": ".tsbuildinfo"
   },
-  "references": [
-    { "path": "../core" },
-    { "path": "../provider-hls" },
-    { "path": "../provider-native" },
-    { "path": "../provider-youtube" }
-  ],
+  "references": [{ "path": "../core" }],
   "include": ["src"]
 }

@@ -3,6 +3,9 @@ import { defineConfig, devices } from '@playwright/test';
 export default defineConfig({
   testDir: './e2e',
   timeout: 10_000,
+  // Tests tagged @real hit third-party networks and are nondeterministic, so
+  // they never block; opt in with REELY_REAL_PROVIDERS=1.
+  grepInvert: process.env.REELY_REAL_PROVIDERS ? undefined : /@real/,
   use: { baseURL: 'http://127.0.0.1:4173' },
   webServer: {
     command:

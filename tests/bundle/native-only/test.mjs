@@ -119,7 +119,22 @@ const server = createServer(async (request, response) => {
 await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
 
 const nativeFile = `/${manifest[nativeProviderKey].file}`;
+const foreignProviderFiles = providerKeys
+  .filter((key) => key !== nativeProviderKey)
+  .map((key) => `/${manifest[key].file}`);
+const youtubeDomains = [
+  'youtube.com',
+  'youtube-nocookie.com',
+  'youtu.be',
+  'ytimg.com',
+  'googlevideo.com'
+];
+const isYouTubeHost = (hostname) =>
+  youtubeDomains.some(
+    (domain) => hostname === domain || hostname.endsWith(`.${domain}`)
+  );
 const requestedScripts = [];
+const requestedUrls = [];
 let browser;
 try {
   const address = server.address();
@@ -129,6 +144,7 @@ try {
   browser = await chromium.launch({ headless: true });
   const page = await browser.newPage();
   page.on('request', (request) => {
+    requestedUrls.push(new URL(request.url()));
     if (request.resourceType() === 'script') {
       requestedScripts.push(new URL(request.url()).pathname);
     }
@@ -178,6 +194,23 @@ try {
     startTimes.some((startTime) => startTime < clickTime)
   ) {
     throw new Error('Native provider request started before interaction.');
+  }
+  // Lazy provider chunks on disk are fine; requesting them is not. A native
+  // fixture must stay YouTube-free at runtime as well as in its static graph.
+  for (const foreignFile of foreignProviderFiles) {
+    if (requestedScripts.includes(foreignFile)) {
+      throw new Error(
+        `A foreign provider chunk was requested at runtime: ${foreignFile}`
+      );
+    }
+  }
+  const youtubeRequest = requestedUrls.find((url) =>
+    isYouTubeHost(url.hostname)
+  );
+  if (youtubeRequest) {
+    throw new Error(
+      `The native fixture contacted a YouTube domain: ${youtubeRequest.href}`
+    );
   }
 } finally {
   try {

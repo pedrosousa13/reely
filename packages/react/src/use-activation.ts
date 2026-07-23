@@ -14,7 +14,9 @@ import {
   useRef,
   useState
 } from 'react';
-import { loadProvider } from './provider-loaders.js';
+import { loadProvider, type PlayerMediaMount } from './provider-loaders.js';
+
+export type { PlayerMediaMount } from './provider-loaders.js';
 
 export type PlayerLoadingStrategy = 'eager' | 'viewport' | 'interaction';
 export type PlayerPreload = 'none' | 'metadata' | 'auto';
@@ -24,7 +26,7 @@ export type ActivationBindings = {
   readonly loading: PlayerLoadingStrategy;
   readonly mediaEligible: boolean;
   readonly preload: PlayerPreload;
-  readonly registerMedia: (media: HTMLVideoElement | null) => void;
+  readonly registerMedia: (media: PlayerMediaMount | null) => void;
   readonly registerViewport: (viewport: HTMLDivElement | null) => void;
 };
 
@@ -34,7 +36,7 @@ export type UseActivationOptions = {
   readonly loadMargin: string;
   readonly loading: PlayerLoadingStrategy;
   readonly nativeOptions: NativePlaybackOptions;
-  readonly prepareMedia: (media: HTMLVideoElement) => void;
+  readonly prepareMedia: (media: PlayerMediaMount) => void;
   readonly preload: PlayerPreload;
   readonly source: SourceDetectionResult;
 };
@@ -165,7 +167,7 @@ export const useActivation = (
     nativeOptions: currentNativeOptions,
     sourceKey: currentKey
   });
-  const mediaRef = useRef<HTMLVideoElement | null>(null);
+  const mediaRef = useRef<PlayerMediaMount | null>(null);
   const viewportRef = useRef<HTMLDivElement | null>(null);
   const observerRef = useRef<ObserverRegistration | undefined>(undefined);
   const loadingGeneration = useRef<number | undefined>(undefined);
@@ -237,7 +239,7 @@ export const useActivation = (
     );
   }, []);
 
-  const registerMedia = useCallback((media: HTMLVideoElement | null) => {
+  const registerMedia = useCallback((media: PlayerMediaMount | null) => {
     const previous = mediaRef.current;
     if (previous === media) return;
     mediaRef.current = media;

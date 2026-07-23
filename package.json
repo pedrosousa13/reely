@@ -16,7 +16,7 @@
     "test:storybook": "pnpm --filter @reely/storybook test",
     "test:integrations": "pnpm --filter @reely/react build && pnpm --filter @reely/integration-next-image build && pnpm --filter @reely/integration-next-image test:integration",
     "test:packages": "node scripts/verify-packaging.mjs",
-    "test:bundle": "pnpm --filter @reely/core build && pnpm --filter @reely/provider-native build && pnpm --filter @reely/provider-hls build && pnpm --filter @reely/react build && pnpm --filter @reely/bundle-native-only build && pnpm --filter @reely/bundle-native-only test",
+    "test:bundle": "pnpm --filter @reely/core build && pnpm --filter @reely/provider-native build && pnpm --filter @reely/provider-hls build && pnpm --filter @reely/provider-youtube build && pnpm --filter @reely/react build && pnpm --filter @reely/bundle-native-only build && pnpm --filter @reely/bundle-native-only test",
     "build": "pnpm -r --if-present run build"
   },
   "devDependencies": {
