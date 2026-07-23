@@ -6,7 +6,7 @@ import {
   type PlayerState
 } from '@reely/core';
 import type { NativePlaybackOptions } from '@reely/provider-native';
-import { useActivation, type ActivationBindings } from './use-activation';
+import { useActivation, type ActivationBindings } from './use-activation.js';
 import {
   createContext,
   isValidElement,
@@ -104,12 +104,12 @@ export type PlayerHandle = Pick<
 
 export type PlayerActions = Omit<PlayerHandle, 'getState' | 'subscribe' | 'on'>;
 
-export type { PlayerLoadingStrategy, PlayerPreload } from './use-activation';
+export type { PlayerLoadingStrategy, PlayerPreload } from './use-activation.js';
 
 export type PlayerActivationProps = {
-  readonly loading?: import('./use-activation').PlayerLoadingStrategy;
+  readonly loading?: import('./use-activation.js').PlayerLoadingStrategy;
   readonly loadMargin?: string;
-  readonly preload?: import('./use-activation').PlayerPreload;
+  readonly preload?: import('./use-activation.js').PlayerPreload;
 };
 
 export type RootProps = NativePlaybackOptions &
