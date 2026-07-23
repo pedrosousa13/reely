@@ -25,6 +25,7 @@ const ignoredSourceDirectories = new Set([
   '.next',
   'coverage',
   'dist',
+  'generated',
   'node_modules',
   'test'
 ]);
