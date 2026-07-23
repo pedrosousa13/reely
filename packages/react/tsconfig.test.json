@@ -9,7 +9,8 @@
   "references": [
     { "path": "../core" },
     { "path": "../provider-hls" },
-    { "path": "../provider-native" }
+    { "path": "../provider-native" },
+    { "path": "../provider-youtube" }
   ],
   "include": ["src", "test"]
 }

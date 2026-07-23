@@ -72,6 +72,11 @@ class ControlledIntersectionObserver implements IntersectionObserver {
 
 const mockedLoadProvider = vi.mocked(loadProvider);
 
+const firstRequestedVideo = (): HTMLVideoElement | undefined => {
+  const media = mockedLoadProvider.mock.calls[0]?.[0].media;
+  return media instanceof HTMLVideoElement ? media : undefined;
+};
+
 type ActivationProbeProps = {
   readonly autoplay?: Player.RootProps['autoplay'];
   readonly controller: PlayerController;
@@ -1096,7 +1101,7 @@ test('one interaction click loads and queues user-origin playback', async () => 
   fireEvent.click(activation);
 
   await vi.waitFor(() => expect(mockedLoadProvider).toHaveBeenCalledOnce());
-  const media = mockedLoadProvider.mock.calls[0]?.[0].media;
+  const media = firstRequestedVideo();
   expect(media?.muted).toBe(true);
   expect(screen.getByRole('status').dataset.state).toBe('loading-provider');
   act(() =>
@@ -1119,7 +1124,7 @@ test('audible blocked playback is not silently muted', async () => {
 
   fireEvent.click(screen.getByRole('button', { name: 'Play video' }));
   await vi.waitFor(() => expect(mockedLoadProvider).toHaveBeenCalledOnce());
-  expect(mockedLoadProvider.mock.calls[0]?.[0].media?.muted).toBe(false);
+  expect(firstRequestedVideo()?.muted).toBe(false);
   act(() =>
     fake.emit({
       activation: 'ready',
@@ -1144,7 +1149,7 @@ test.each([
     const { rerender } = render(interactionFixture({ muted: initialMuted }));
     fireEvent.click(screen.getByRole('button', { name: 'Play video' }));
     await vi.waitFor(() => expect(mockedLoadProvider).toHaveBeenCalledOnce());
-    const media = mockedLoadProvider.mock.calls[0]?.[0].media;
+    const media = firstRequestedVideo();
     expect(media?.muted).toBe(initialMuted);
     let mutedAtAttach: boolean | undefined;
     const fake = createFakeProvider({
@@ -1170,7 +1175,7 @@ test('reconciles controlled volume and playback rate before pending provider ins
   );
   fireEvent.click(screen.getByRole('button', { name: 'Play video' }));
   await vi.waitFor(() => expect(mockedLoadProvider).toHaveBeenCalledOnce());
-  const media = mockedLoadProvider.mock.calls[0]?.[0].media;
+  const media = firstRequestedVideo();
   expect(media).toMatchObject({ playbackRate: 1.25, volume: 0.25 });
   let preferencesAtAttach:
     { readonly playbackRate: number; readonly volume: number } | undefined;

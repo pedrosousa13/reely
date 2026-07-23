@@ -9,7 +9,8 @@ export default defineConfig({
         'react/jsx-runtime',
         '@reely/core',
         '@reely/provider-hls',
-        '@reely/provider-native'
+        '@reely/provider-native',
+        '@reely/provider-youtube'
       ]
     },
     sourcemap: true,
