@@ -2,6 +2,7 @@ import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import type { StorybookConfig } from '@storybook/react-vite';
 import { mergeConfig } from 'vite';
+import { hangEndpointPlugin } from '../src/hang-endpoint-plugin';
 
 const fromRepoRoot = (path: string): string =>
   fileURLToPath(new URL(`../../../${path}`, import.meta.url));
@@ -14,6 +15,7 @@ const config: StorybookConfig = {
   addons: ['@storybook/addon-vitest', '@storybook/addon-a11y'],
   viteFinal: async (viteConfig) =>
     mergeConfig(viteConfig, {
+      plugins: [hangEndpointPlugin()],
       resolve: {
         alias: [
           {
