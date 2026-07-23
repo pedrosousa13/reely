@@ -5,10 +5,12 @@ import type {
   HlsSource,
   PlayerCapabilities,
   PlayerError,
+  PlayerLiveState,
   ProviderAdapter,
   ProviderEvent,
   ProviderStateListener,
-  ProviderStatePatch
+  ProviderStatePatch,
+  TimeRange
 } from '@reely/core';
 import {
   createNativeProvider,
@@ -33,6 +35,9 @@ export type HlsLevelLike = {
 export type HlsInstanceLike = {
   readonly levels: ReadonlyArray<HlsLevelLike>;
   currentLevel: number;
+  // The target live edge (behind the raw seekable end by the configured live
+  // sync latency); null on VOD or before the first live level update.
+  readonly liveSyncPosition?: number | null;
   on: (event: string, listener: (event: string, data: unknown) => void) => void;
   startLoad: () => void;
   recoverMediaError: () => void;
@@ -48,6 +53,7 @@ export type HlsConstructorLike = {
   readonly Events: {
     readonly ERROR: string;
     readonly LEVEL_SWITCHED: string;
+    readonly LEVEL_UPDATED: string;
     readonly MANIFEST_PARSED: string;
   };
   readonly ErrorTypes: {
@@ -64,10 +70,73 @@ export type HlsProviderOptions = NativePlaybackOptions & {
   readonly loadHls?: HlsModuleLoader;
 };
 
+export type LiveDerivationInput = {
+  // Authoritative liveness when defined (hls.js level details). Left undefined
+  // on the native engine, where liveness is inferred from duration instead.
+  readonly isLiveHint?: boolean;
+  // Raw media element duration: Infinity or NaN for an ordinary live stream.
+  readonly duration: number;
+  readonly seekable: ReadonlyArray<TimeRange>;
+  readonly currentTime: number;
+  // hls.js liveSyncPosition when known; the target live edge behind the raw
+  // seekable end. Falls back to the seekable end when undefined.
+  readonly liveEdge?: number;
+  readonly atEdgeThreshold: number;
+};
+
+// Derives normalized live status from stream data alone. Liveness comes from
+// the hls.js live flag when present, otherwise from an infinite duration —
+// never from the source URL. Edge state is measured against a moving window,
+// clamped so a current time at or beyond the edge never reads as behind and no
+// arithmetic escapes as NaN or a negative distance.
+export const deriveLiveState = (
+  input: LiveDerivationInput
+): PlayerLiveState => {
+  const isLive =
+    input.isLiveHint ?? input.duration === Number.POSITIVE_INFINITY;
+  if (!isLive) return null;
+  const seekableEnd = input.seekable.reduce(
+    (end, range) => Math.max(end, range.end),
+    Number.NEGATIVE_INFINITY
+  );
+  const edge = Number.isFinite(input.liveEdge)
+    ? (input.liveEdge as number)
+    : seekableEnd;
+  if (!Number.isFinite(edge) || !Number.isFinite(input.currentTime)) {
+    return Object.freeze({ isLive: true, atLiveEdge: true });
+  }
+  const distance = Math.max(0, edge - input.currentTime);
+  return Object.freeze({
+    isLive: true,
+    atLiveEdge: distance <= input.atEdgeThreshold
+  });
+};
+
 const NATIVE_HLS_MIME = 'application/vnd.apple.mpegurl';
 const MSE_TEST_CODEC = 'video/mp4; codecs="avc1.42E01E,mp4a.40.2"';
 const MAX_FATAL_NETWORK_RECOVERIES = 2;
 const MAX_FATAL_MEDIA_RECOVERIES = 2;
+// Ordinary-live tolerances. At-edge is a coarse "close to the live edge"
+// window, not the tight target of DVR/LL-HLS tuning (out of MVP scope). A
+// seekable span below the minimum is treated as pure live edge with no
+// meaningful window to scrub.
+const LIVE_EDGE_THRESHOLD_SECONDS = 10;
+const LIVE_MIN_SEEK_WINDOW_SECONDS = 2;
+
+const readMediaRanges = (
+  ranges: globalThis.TimeRanges
+): ReadonlyArray<TimeRange> =>
+  Array.from({ length: ranges.length }, (_, index) => ({
+    start: ranges.start(index),
+    end: ranges.end(index)
+  }));
+
+const liveStateEqual = (a: PlayerLiveState, b: PlayerLiveState): boolean =>
+  a === b ||
+  (a !== null &&
+    b !== null &&
+    a.isLive === b.isLive &&
+    a.atLiveEdge === b.atLiveEdge);
 
 type MediaSourceLike = { isTypeSupported?: (type: string) => boolean };
 
@@ -166,21 +235,95 @@ export const createHlsProvider = (
     reason: 'provider-check'
   };
   let lastCapabilities: PlayerCapabilities | undefined;
+  let hlsLiveHint: boolean | undefined;
+  let liveState: PlayerLiveState = null;
+  let liveSeekMeaningful = true;
 
   const emit = (patch: ProviderStatePatch, event?: ProviderEvent): void => {
     if (destroyed) return;
     listeners.forEach((listener) => listener(patch, event));
   };
 
-  const withQualityCapability = (
+  const decorateCapabilities = (
     capabilities: PlayerCapabilities
-  ): PlayerCapabilities => ({
-    ...capabilities,
-    selectQuality:
-      engine === 'native'
-        ? { status: 'unavailable', reason: 'provider' }
-        : selectQualityAvailability
-  });
+  ): PlayerCapabilities => {
+    const withQuality: PlayerCapabilities = {
+      ...capabilities,
+      selectQuality:
+        engine === 'native'
+          ? { status: 'unavailable', reason: 'provider' }
+          : selectQualityAvailability
+    };
+    return liveSeekMeaningful
+      ? withQuality
+      : { ...withQuality, seek: { status: 'unavailable', reason: 'source' } };
+  };
+
+  const computeLiveState = (): PlayerLiveState =>
+    deriveLiveState({
+      isLiveHint: engine === 'hls.js' ? hlsLiveHint : undefined,
+      duration: media.duration,
+      seekable: readMediaRanges(media.seekable),
+      currentTime: media.currentTime,
+      liveEdge:
+        engine === 'hls.js' ? (hls?.liveSyncPosition ?? undefined) : undefined,
+      atEdgeThreshold: LIVE_EDGE_THRESHOLD_SECONDS
+    });
+
+  const seekWindowMeaningful = (live: PlayerLiveState): boolean => {
+    if (!live?.isLive) return true;
+    const ranges = readMediaRanges(media.seekable);
+    if (ranges.length === 0) return false;
+    const start = Math.min(...ranges.map((range) => range.start));
+    const end = Math.max(...ranges.map((range) => range.end));
+    const span = end - start;
+    return Number.isFinite(span) && span >= LIVE_MIN_SEEK_WINDOW_SECONDS;
+  };
+
+  // Recomputes live status and merges any change into an outgoing patch:
+  // liveness plus a `null` duration (never a false fixed duration while live)
+  // and a re-decorated capabilities set when the seekable window crosses the
+  // threshold that makes scrubbing meaningful. Shared by the native patch
+  // pipeline and the hls.js level-update listener.
+  const syncLive = (patch: ProviderStatePatch): ProviderStatePatch => {
+    const nextLive = computeLiveState();
+    const meaningful = seekWindowMeaningful(nextLive);
+    const liveChanged = !liveStateEqual(nextLive, liveState);
+    const meaningfulChanged = meaningful !== liveSeekMeaningful;
+    liveState = nextLive;
+    liveSeekMeaningful = meaningful;
+    const liveField: ProviderStatePatch = liveChanged ? { live: nextLive } : {};
+    const durationField: ProviderStatePatch = liveChanged
+      ? {
+          duration: nextLive?.isLive
+            ? null
+            : Number.isFinite(media.duration)
+              ? media.duration
+              : (patch.duration ?? null)
+        }
+      : nextLive?.isLive && patch.duration !== undefined
+        ? { duration: null }
+        : {};
+    const capabilitiesField: ProviderStatePatch = patch.capabilities
+      ? { capabilities: decorateCapabilities(patch.capabilities) }
+      : meaningfulChanged && lastCapabilities
+        ? { capabilities: decorateCapabilities(lastCapabilities) }
+        : {};
+    return { ...patch, ...liveField, ...durationField, ...capabilitiesField };
+  };
+
+  const emitLiveUpdate = (): void => {
+    const before = liveState;
+    const beforeMeaningful = liveSeekMeaningful;
+    const patch = syncLive({});
+    if (
+      liveStateEqual(before, liveState) &&
+      beforeMeaningful === liveSeekMeaningful
+    ) {
+      return;
+    }
+    emit(patch);
+  };
 
   const unsubscribeNative = native.subscribe((patch, event) => {
     if (destroyed) return;
@@ -189,15 +332,8 @@ export const createHlsProvider = (
       // element errors would preempt its bounded recovery table.
       return;
     }
-    if (patch.capabilities) {
-      lastCapabilities = patch.capabilities;
-      emit(
-        { ...patch, capabilities: withQualityCapability(patch.capabilities) },
-        event
-      );
-      return;
-    }
-    emit(patch, event);
+    if (patch.capabilities) lastCapabilities = patch.capabilities;
+    emit(syncLive(patch), event);
   });
 
   const teardownHls = (): void => {
@@ -223,7 +359,7 @@ export const createHlsProvider = (
         seeking: false,
         quality: null,
         ...(lastCapabilities
-          ? { capabilities: withQualityCapability(lastCapabilities) }
+          ? { capabilities: decorateCapabilities(lastCapabilities) }
           : {}),
         error
       },
@@ -345,8 +481,14 @@ export const createHlsProvider = (
       if (destroyed || hls !== instance) return;
       selectQualityAvailability = { status: 'available' };
       if (lastCapabilities) {
-        emit({ capabilities: withQualityCapability(lastCapabilities) });
+        emit({ capabilities: decorateCapabilities(lastCapabilities) });
       }
+    });
+    instance.on(HlsRuntime.Events.LEVEL_UPDATED, (_event, data) => {
+      if (destroyed || hls !== instance) return;
+      const live = (data as { details?: { live?: boolean } }).details?.live;
+      if (typeof live === 'boolean') hlsLiveHint = live;
+      emitLiveUpdate();
     });
     instance.attachMedia(media);
     instance.loadSource(source.src);
@@ -424,6 +566,9 @@ export const createHlsProvider = (
         status: 'unknown',
         reason: 'provider-check'
       };
+      hlsLiveHint = undefined;
+      liveState = null;
+      liveSeekMeaningful = true;
       teardownHls();
       return startHlsJs();
     },

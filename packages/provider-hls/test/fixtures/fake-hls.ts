@@ -8,6 +8,7 @@ export class FakeHls implements HlsInstanceLike {
   static readonly Events = {
     ERROR: 'hlsError',
     LEVEL_SWITCHED: 'hlsLevelSwitched',
+    LEVEL_UPDATED: 'hlsLevelUpdated',
     MANIFEST_PARSED: 'hlsManifestParsed'
   };
   static readonly ErrorTypes = {
@@ -22,6 +23,7 @@ export class FakeHls implements HlsInstanceLike {
 
   levels: HlsLevelLike[] = [];
   currentLevel = -1;
+  liveSyncPosition: number | null = null;
   destroyed = false;
   attachedMedia: HTMLMediaElement | undefined;
   loadedSource: string | undefined;
@@ -46,6 +48,12 @@ export class FakeHls implements HlsInstanceLike {
 
   emitFatalError = (type: string, details = 'fatal'): void => {
     this.emit(FakeHls.Events.ERROR, { type, details, fatal: true });
+  };
+
+  emitLevelUpdated = (live: boolean, liveSyncPosition?: number): void => {
+    if (liveSyncPosition !== undefined)
+      this.liveSyncPosition = liveSyncPosition;
+    this.emit(FakeHls.Events.LEVEL_UPDATED, { details: { live } });
   };
 
   startLoad = (): void => {

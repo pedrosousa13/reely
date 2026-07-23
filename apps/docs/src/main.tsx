@@ -49,14 +49,16 @@ const vimeoSource: Player.RootProps['source'] | null =
 const activationSource: Player.RootProps['source'] =
   sourceParameter === 'hls'
     ? { type: 'hls', src: '/hls/master.m3u8', engine: hlsEngine }
-    : (vimeoSource ??
-      (sourceChange
-        ? 'https://provider.invalid/source-a.mp4'
-        : parameters.get('activationSource') === 'external'
-          ? 'https://provider.invalid/tracer.mp4'
-          : parameters.get('activationSource') === 'youtube'
-            ? youtubeExampleUrl
-            : '/tracer.mp4'));
+    : sourceParameter === 'live'
+      ? { type: 'hls', src: '/live/index.m3u8', engine: hlsEngine }
+      : (vimeoSource ??
+        (sourceChange
+          ? 'https://provider.invalid/source-a.mp4'
+          : parameters.get('activationSource') === 'external'
+            ? 'https://provider.invalid/tracer.mp4'
+            : parameters.get('activationSource') === 'youtube'
+              ? youtubeExampleUrl
+              : '/tracer.mp4'));
 const replacementSource = sourceChange
   ? 'https://provider.invalid/source-b.mp4'
   : null;
@@ -141,6 +143,91 @@ const StateProbes = () => {
   );
 };
 
+const formatClock = (seconds: number): string => {
+  // Never renders NaN or a negative value: unusable inputs collapse to 0:00.
+  const safe = Number.isFinite(seconds) && seconds > 0 ? seconds : 0;
+  const whole = Math.floor(safe);
+  const minutes = Math.floor(whole / 60);
+  const secs = whole % 60;
+  return `${minutes}:${secs.toString().padStart(2, '0')}`;
+};
+
+const LiveControls = () => {
+  const live = Player.usePlayerState((state) => ({
+    isLive: state.live?.isLive ?? false,
+    atLiveEdge: state.live?.atLiveEdge ?? false,
+    known: state.live !== null,
+    currentTime: state.currentTime,
+    duration: state.duration,
+    seekableEnd:
+      state.seekable.length > 0
+        ? Math.max(...state.seekable.map((range) => range.end))
+        : null,
+    seekableStart:
+      state.seekable.length > 0
+        ? Math.min(...state.seekable.map((range) => range.start))
+        : null,
+    seekStatus: state.capabilities.seek.status
+  }));
+  const actions = Player.usePlayerActions();
+
+  // While live the seek slider maps the moving window; the time display shows
+  // how far behind the live edge the position is, never a fixed duration.
+  const behindEdgeSeconds =
+    live.isLive && live.seekableEnd !== null
+      ? Math.max(0, live.seekableEnd - live.currentTime)
+      : 0;
+  const timeLabel = live.isLive
+    ? live.atLiveEdge
+      ? 'LIVE'
+      : `-${formatClock(behindEdgeSeconds)}`
+    : `${formatClock(live.currentTime)} / ${formatClock(live.duration ?? 0)}`;
+
+  return (
+    <p
+      data-testid="live-panel"
+      data-live-known={live.known ? 'true' : 'false'}
+      data-live-status={live.isLive ? 'live' : 'vod'}
+      data-live-edge={
+        live.isLive ? (live.atLiveEdge ? 'at-edge' : 'behind-edge') : 'none'
+      }
+      data-seek-status={live.seekStatus}
+    >
+      <span data-testid="live-indicator">
+        {live.isLive ? (live.atLiveEdge ? 'LIVE' : 'BEHIND LIVE') : 'VOD'}
+      </span>{' '}
+      · <span data-testid="live-time">{timeLabel}</span>{' '}
+      {live.isLive && live.seekStatus === 'available' ? (
+        <>
+          <button
+            data-testid="live-seek-back"
+            onClick={() =>
+              void (
+                live.seekableStart !== null &&
+                actions.seekTo(live.seekableStart)
+              )
+            }
+            type="button"
+          >
+            Jump to start
+          </button>{' '}
+          <button
+            data-testid="live-seek-edge"
+            onClick={() =>
+              void (
+                live.seekableEnd !== null && actions.seekTo(live.seekableEnd)
+              )
+            }
+            type="button"
+          >
+            Jump to live
+          </button>
+        </>
+      ) : null}
+    </p>
+  );
+};
+
 const PlayerFixture = () => {
   const [source, setSource] = useState(activationSource);
 
@@ -180,6 +267,7 @@ const PlayerFixture = () => {
         </Player.Viewport>
         <Player.PlayButton />
         <PresentationControls />
+        <LiveControls />
         <StateProbes />
       </Player.Root>
       {replacementSource && source !== replacementSource ? (
@@ -408,6 +496,40 @@ await selectQuality(null) // back to automatic adaptation`}</pre>
       surface <code>unsupported</code>; on the native engine, media element
       errors map to <code>network</code>, <code>decode</code>, or{' '}
       <code>source</code> exactly as for MP4 playback.
+    </p>
+    <h3>Live streams</h3>
+    <p>
+      Ordinary live HLS is supported. Liveness is derived from stream data, not
+      from the source URL: the hls.js live flag when the engine reports one, and
+      otherwise an infinite media duration. A stream whose URL contains no hint
+      of &quot;live&quot; is still detected as live. The normalized status is{' '}
+      <code>
+        state.live: {'{'} isLive: boolean; atLiveEdge: boolean {'}'} | null
+      </code>
+      , where <code>null</code> means not live or not yet known. Try{' '}
+      <code>?source=live</code> on this page.
+    </p>
+    <p>
+      Controls adapt to the moving seekable window. While live, the reported
+      duration is <code>null</code> rather than a false fixed duration, so time
+      displays never show <code>NaN</code>, a negative range, or an invented
+      end. The seek slider maps the current seekable window, which slides
+      forward as new segments arrive and old ones fall off; the time display
+      shows the position relative to the live edge (at the edge, or how far
+      behind it), and a live indicator distinguishes at-edge from behind-edge
+      playback. Seeking behind the live edge stays within the window. When the
+      window is too small to scrub, <code>capabilities.seek</code> reports{' '}
+      <code>unavailable</code> with reason <code>source</code> so a control
+      layer can hide a meaningless slider. When a live stream ends and becomes
+      VOD-like, <code>state.live</code> returns to <code>null</code> and the
+      now-finite duration is restored without a frozen UI. Reconnection reuses
+      the same bounded network and media recovery as VOD playback.
+    </p>
+    <p>
+      <strong>MVP scope.</strong> This is <em>ordinary</em> live only.
+      Low-latency HLS (LL-HLS) tuning, DVR-specialized controls (long rewind
+      windows, program markers), and aggressive live-edge latency tuning are out
+      of scope and deliberately not implemented.
     </p>
     <h2>YouTube</h2>
     <p>
