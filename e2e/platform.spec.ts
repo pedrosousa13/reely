@@ -3,6 +3,7 @@ import { expect, test, type Page } from '@playwright/test';
 type PresentationExpectation = {
   fullscreen: string;
   pictureInPicture: string;
+  airPlay: string;
 };
 
 const capabilities = (page: Page) =>
@@ -48,7 +49,16 @@ const environmentExpectation = (page: Page): Promise<PresentationExpectation> =>
           : supportsWebKitPictureInPicture
             ? 'available'
             : 'unavailable';
-    return { fullscreen, pictureInPicture };
+    const airPlayDenied =
+      media.getAttribute('x-webkit-airplay') === 'deny' ||
+      media.disableRemotePlayback === true;
+    const airPlay =
+      typeof media.webkitShowPlaybackTargetPicker !== 'function'
+        ? 'unavailable'
+        : airPlayDenied
+          ? 'unavailable'
+          : 'available';
+    return { fullscreen, pictureInPicture, airPlay };
   });
 
 test('platform capability reporting matches what the browser supports', async ({
@@ -67,6 +77,38 @@ test('platform capability reporting matches what the browser supports', async ({
     'data-pip-status',
     expected.pictureInPicture
   );
+  await expect(capabilities(page)).toHaveAttribute(
+    'data-airplay-status',
+    expected.airPlay
+  );
+});
+
+test('platform AirPlay capability is WebKit-only and gates the picker control', async ({
+  browserName,
+  page
+}) => {
+  await page.goto('/', { waitUntil: 'domcontentloaded' });
+  await awaitCapabilityResolution(page);
+
+  const airPlayStatus = await capabilities(page).getAttribute(
+    'data-airplay-status'
+  );
+  await expect(page.getByTestId('airplay-picker')).toHaveCount(
+    airPlayStatus === 'available' ? 1 : 0
+  );
+
+  if (browserName === 'webkit') {
+    expect(airPlayStatus).toBe('available');
+  }
+  if (browserName === 'chromium' || browserName === 'firefox') {
+    // Only WebKit exposes a programmatic AirPlay route picker. The actual
+    // picker UI and route selection run in the manual device matrix.
+    expect(airPlayStatus).toBe('unavailable');
+    await expect(capabilities(page)).toHaveAttribute(
+      'data-airplay-reason',
+      'browser'
+    );
+  }
 });
 
 test('platform capability gating shows presentation controls only when available', async ({

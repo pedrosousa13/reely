@@ -74,6 +74,11 @@ const PresentationControls = () => {
     pictureInPictureReason:
       'reason' in state.capabilities.pictureInPicture
         ? state.capabilities.pictureInPicture.reason
+        : undefined,
+    airPlayStatus: state.capabilities.airPlay.status,
+    airPlayReason:
+      'reason' in state.capabilities.airPlay
+        ? state.capabilities.airPlay.reason
         : undefined
   }));
   const actions = Player.usePlayerActions();
@@ -87,6 +92,8 @@ const PresentationControls = () => {
       data-pip-status={presentation.pictureInPictureStatus}
       data-pip-reason={presentation.pictureInPictureReason}
       data-pip-state={presentation.pictureInPicture ? 'active' : 'inline'}
+      data-airplay-status={presentation.airPlayStatus}
+      data-airplay-reason={presentation.airPlayReason}
     >
       {presentation.fullscreenStatus === 'available' ? (
         <button
@@ -114,6 +121,15 @@ const PresentationControls = () => {
           {presentation.pictureInPicture
             ? 'Exit picture-in-picture'
             : 'Enter picture-in-picture'}
+        </button>
+      ) : null}{' '}
+      {presentation.airPlayStatus === 'available' ? (
+        <button
+          data-testid="airplay-picker"
+          onClick={() => void actions.showAirPlayPicker()}
+          type="button"
+        >
+          AirPlay
         </button>
       ) : null}{' '}
       Fullscreen: {presentation.fullscreenStatus}
@@ -150,6 +166,13 @@ const PlayerFixture = () => {
         autoplay={autoplay}
         defaultMuted={defaultMuted}
         loading={loading}
+        mediaMetadata={{
+          title: 'Reely tracer',
+          artist: 'Reely',
+          artwork: [
+            { src: '/poster.svg', sizes: '1280x720', type: 'image/svg+xml' }
+          ]
+        }}
         preload={preload}
         ref={(handle) => {
           window.reelyHandle = handle ?? undefined;
@@ -646,6 +669,110 @@ const { requestFullscreen } = Player.usePlayerActions()
       . A media element with <code>disablePictureInPicture</code> reports the
       capability as <code>unavailable</code> with reason <code>policy</code>.
     </p>
+    <h2>AirPlay and Media Session</h2>
+    <p>
+      <code>showAirPlayPicker()</code> opens the native AirPlay route picker. It
+      is a WebKit-only action (<code>webkitShowPlaybackTargetPicker</code>):
+      gate it on <code>capabilities.airPlay</code> being <code>available</code>.
+      On non-WebKit engines the capability reports <code>unavailable</code> with
+      reason <code>browser</code>; a media element that opts out of AirPlay (
+      <code>x-webkit-airplay=&quot;deny&quot;</code> or{' '}
+      <code>disableRemotePlayback</code>) reports <code>unavailable</code> with
+      reason <code>policy</code>. Like fullscreen, permission and user-gesture
+      failures resolve to{' '}
+      <code>
+        {'{'} ok: false, reason: 'blocked' {'}'}
+      </code>{' '}
+      instead of throwing.
+    </p>
+    <pre>{`const airPlay = Player.usePlayerState((state) => state.capabilities.airPlay)
+const { showAirPlayPicker } = Player.usePlayerActions()
+
+{airPlay.status === 'available' && (
+  <button onClick={() => void showAirPlayPicker()}>AirPlay</button>
+)}`}</pre>
+    <p>
+      Media Session powers lock-screen and hardware-key controls. Reely never
+      scrapes metadata from the media source: pass it explicitly through the{' '}
+      <code>mediaMetadata</code> prop, and Reely wires the play, pause, and seek
+      action handlers to the player. Metadata and handlers are cleaned up on
+      source change and unmount.
+    </p>
+    <pre>{`<Player.Root
+  source="/video.mp4"
+  mediaMetadata={{
+    title: 'Episode 1',
+    artist: 'Reely',
+    artwork: [{ src: '/art.png', sizes: '512x512', type: 'image/png' }],
+  }}
+>...</Player.Root>`}</pre>
+    <h3>Single-session ownership</h3>
+    <p>
+      A document has exactly one <code>navigator.mediaSession</code>. When a
+      page hosts several players, the <strong>most-recently-playing</strong>{' '}
+      Reely root owns the metadata and action handlers. A root releases
+      ownership when another root starts playing, on teardown, or on unmount,
+      and it never clears handlers it does not own, so the lock screen always
+      reflects the player the listener last started.
+    </p>
+    <p>
+      <strong>Media Session is not exclusive playback.</strong> It arbitrates
+      only the lock-screen surface; it does not pause other players. Two Reely
+      roots can play at the same time, and only the lock-screen controls follow
+      the most recent one. Enforcing a single active player (exclusive playback
+      groups) is a separate concern and is out of scope for the MVP.
+    </p>
+    <h3>Platform support matrix</h3>
+    <table>
+      <thead>
+        <tr>
+          <th>Platform</th>
+          <th>AirPlay picker</th>
+          <th>Media Session</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Safari (macOS, iPadOS)</td>
+          <td>
+            <code>webkitShowPlaybackTargetPicker</code> — available
+          </td>
+          <td>Available (lock screen / Control Center)</td>
+        </tr>
+        <tr>
+          <td>Safari (iPhone)</td>
+          <td>
+            <code>webkitShowPlaybackTargetPicker</code> — available
+          </td>
+          <td>Available (lock screen)</td>
+        </tr>
+        <tr>
+          <td>Chrome / Edge (desktop, Android)</td>
+          <td>
+            No WebKit picker — <code>unavailable</code> (reason{' '}
+            <code>browser</code>); cast lives in the browser menu
+          </td>
+          <td>Available (hardware keys, Android media notification)</td>
+        </tr>
+        <tr>
+          <td>Firefox (desktop, Android)</td>
+          <td>
+            <code>unavailable</code> (reason <code>browser</code>)
+          </td>
+          <td>Available (hardware keys)</td>
+        </tr>
+        <tr>
+          <td>
+            <code>x-webkit-airplay=&quot;deny&quot;</code> /{' '}
+            <code>disableRemotePlayback</code>
+          </td>
+          <td>
+            <code>unavailable</code> (reason <code>policy</code>)
+          </td>
+          <td>n/a</td>
+        </tr>
+      </tbody>
+    </table>
     <h2>Autoplay</h2>
     <p>
       Set <code>autoplay</code> to <code>false</code> (the default),{' '}
