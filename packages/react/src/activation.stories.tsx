@@ -2,7 +2,14 @@ import type { Meta, StoryObj } from '@storybook/react-vite';
 import { expect, userEvent, waitFor, within } from 'storybook/test';
 import * as Player from '@reely/react';
 
-const viewportStyle = { width: 320, height: 180 } as const;
+// Subtle neutral chrome so the headless primitive has visible bounds in the
+// workbench — theming itself belongs to issue #10.
+const viewportStyle = {
+  width: 320,
+  height: 180,
+  border: '1px dashed #94a3b8',
+  background: '#f1f5f9'
+} as const;
 
 const meta = {
   title: 'Player/ActivationButton',
