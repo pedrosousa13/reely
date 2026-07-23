@@ -105,7 +105,8 @@ export class FakeVimeoPlayer implements VimeoSdkPlayer {
   );
 
   setPlaybackRate: Mock<(rate: number) => Promise<unknown>> = vi.fn((rate) => {
-    if (this.#options.setPlaybackRate) return this.#options.setPlaybackRate(rate);
+    if (this.#options.setPlaybackRate)
+      return this.#options.setPlaybackRate(rate);
     this.playbackRate = rate;
     return Promise.resolve(rate);
   });

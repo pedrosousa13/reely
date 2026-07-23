@@ -1,0 +1,656 @@
+import type {
+  Availability,
+  CommandResult,
+  PlayerCapabilities,
+  PlayerError,
+  PlayerEventDetailMap,
+  PlayerEventType,
+  ProviderAdapter,
+  ProviderEvent,
+  ProviderEventFor,
+  ProviderStateListener,
+  VimeoSource
+} from '@reely/core';
+import {
+  loadVimeoSdk,
+  type VimeoSdkPlayer,
+  type VimeoSdkTextTrack
+} from './loader.js';
+
+export { loadVimeoSdk, resetVimeoSdkLoader } from './loader.js';
+export type {
+  VimeoSdkConstructor,
+  VimeoSdkEventListener,
+  VimeoSdkModule,
+  VimeoSdkPlayer,
+  VimeoSdkTextTrack
+} from './loader.js';
+
+const available: Availability = { status: 'available' };
+const providerCheck: Availability = {
+  status: 'unknown',
+  reason: 'provider-check'
+};
+
+export type VimeoMountElement = HTMLElement & {
+  muted?: boolean;
+  volume?: number;
+  playbackRate?: number;
+};
+
+export type VimeoProviderOptions = {
+  readonly controls?: boolean;
+  readonly dnt?: boolean;
+};
+
+type VimeoCommand =
+  | 'play'
+  | 'pause'
+  | 'seekTo'
+  | 'seekBy'
+  | 'mute'
+  | 'unmute'
+  | 'setVolume'
+  | 'setPlaybackRate'
+  | 'selectTextTrack'
+  | 'requestFullscreen'
+  | 'exitFullscreen'
+  | 'requestPictureInPicture'
+  | 'exitPictureInPicture'
+  | 'retry';
+
+export type VimeoProviderAdapter = ProviderAdapter &
+  Required<Pick<ProviderAdapter, VimeoCommand>> & {
+    readonly provider: 'vimeo';
+  };
+
+const errorString = (cause: unknown, property: 'message' | 'name') => {
+  if (
+    (typeof cause !== 'object' || cause === null) &&
+    typeof cause !== 'function'
+  ) {
+    return undefined;
+  }
+  try {
+    const value = Reflect.get(cause, property);
+    return typeof value === 'string' ? value : undefined;
+  } catch {
+    return undefined;
+  }
+};
+
+const commandFailure = (
+  cause: unknown
+): Exclude<CommandResult, { ok: true }> => {
+  const name = errorString(cause, 'name');
+  const message = errorString(cause, 'message') || 'The Vimeo command failed.';
+  if (name === 'NotAllowedError') {
+    return {
+      ok: false,
+      reason: 'blocked',
+      error: {
+        category: 'policy',
+        fatal: false,
+        recoverable: true,
+        message,
+        cause
+      }
+    };
+  }
+  if (name === 'UnsupportedError' || name === 'NotSupportedError') {
+    return {
+      ok: false,
+      reason: 'unsupported',
+      error: {
+        category: 'unsupported',
+        fatal: false,
+        recoverable: true,
+        message,
+        cause
+      }
+    };
+  }
+  return {
+    ok: false,
+    reason: 'provider-error',
+    error: {
+      category: 'provider',
+      fatal: false,
+      recoverable: true,
+      message,
+      cause
+    }
+  };
+};
+
+const loadFailure = (cause: unknown): PlayerError => {
+  const name = errorString(cause, 'name');
+  const category =
+    name === 'PrivacyError' || name === 'PasswordError'
+      ? 'policy'
+      : name === 'NotFoundError'
+        ? 'source'
+        : 'provider';
+  return {
+    category,
+    fatal: true,
+    recoverable: category === 'provider',
+    message:
+      errorString(cause, 'message') || 'The Vimeo player could not load.',
+    cause
+  };
+};
+
+const vimeoWatchUrl = (source: VimeoSource): string =>
+  `https://vimeo.com/${source.videoId}${source.hash ? `/${source.hash}` : ''}`;
+
+const vimeoEmbedUrl = (
+  source: VimeoSource,
+  options: VimeoProviderOptions,
+  muted: boolean | undefined
+): string => {
+  const url = new URL(`https://player.vimeo.com/video/${source.videoId}`);
+  if (source.hash) url.searchParams.set('h', source.hash);
+  url.searchParams.set('controls', options.controls === true ? '1' : '0');
+  url.searchParams.set('dnt', options.dnt === false ? '0' : '1');
+  url.searchParams.set('playsinline', '1');
+  if (muted) url.searchParams.set('muted', '1');
+  return url.href;
+};
+
+const planLimitedAccountTypes = new Set(['free', 'basic']);
+
+const chromelessAvailability = async (
+  source: VimeoSource
+): Promise<Availability> => {
+  try {
+    const response = await fetch(
+      `https://vimeo.com/api/oembed.json?url=${encodeURIComponent(
+        vimeoWatchUrl(source)
+      )}`
+    );
+    if (!response.ok) return providerCheck;
+    const data: unknown = await response.json();
+    const accountType =
+      typeof data === 'object' &&
+      data !== null &&
+      'account_type' in data &&
+      typeof data.account_type === 'string'
+        ? data.account_type
+        : undefined;
+    if (!accountType) return providerCheck;
+    return planLimitedAccountTypes.has(accountType)
+      ? { status: 'unavailable', reason: 'provider-plan' }
+      : available;
+  } catch {
+    return providerCheck;
+  }
+};
+
+const settleWithFallback = <Value>(
+  promise: Promise<Value>,
+  fallback: Value,
+  milliseconds: number
+): Promise<Value> =>
+  new Promise((resolve) => {
+    const timer = setTimeout(() => resolve(fallback), milliseconds);
+    promise.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      () => {
+        clearTimeout(timer);
+        resolve(fallback);
+      }
+    );
+  });
+
+const asRecord = (data: unknown): Record<string, unknown> =>
+  typeof data === 'object' && data !== null
+    ? (data as Record<string, unknown>)
+    : {};
+
+const numberField = (data: unknown, field: string): number | undefined => {
+  const value = asRecord(data)[field];
+  return typeof value === 'number' && Number.isFinite(value)
+    ? value
+    : undefined;
+};
+
+export const createVimeoProvider = (
+  mount: VimeoMountElement,
+  source: VimeoSource,
+  options: VimeoProviderOptions = {}
+): VimeoProviderAdapter => {
+  const listeners = new Set<ProviderStateListener>();
+  let attached = false;
+  let destroyed = false;
+  let started = false;
+  let generation = 0;
+  let activePlayer: VimeoSdkPlayer | undefined;
+  let activeIframe: HTMLIFrameElement | undefined;
+  let currentTime = 0;
+  let duration: number | null = null;
+  let textTracks: ReadonlyArray<VimeoSdkTextTrack> = [];
+  let volumeAvailability: Availability = available;
+  let playbackRateAvailability: Availability = available;
+  let pictureInPictureAvailability: Availability = available;
+  let textTrackAvailability: Availability = providerCheck;
+  let customControlsAvailability: Availability = providerCheck;
+
+  const emit = (
+    patch: Parameters<ProviderStateListener>[0],
+    event?: ProviderEvent
+  ): void => listeners.forEach((listener) => listener(patch, event));
+
+  const event = <Type extends PlayerEventType>(
+    type: Type,
+    detail: PlayerEventDetailMap[Type],
+    originalEvent?: unknown
+  ): ProviderEventFor<Type> => ({
+    type,
+    detail,
+    origin: 'provider',
+    ...(originalEvent === undefined ? {} : { originalEvent })
+  });
+
+  const capabilities = (): PlayerCapabilities => ({
+    seek: available,
+    setVolume: volumeAvailability,
+    setPlaybackRate: playbackRateAvailability,
+    selectQuality: providerCheck,
+    selectTextTrack: textTrackAvailability,
+    fullscreen: available,
+    pictureInPicture: pictureInPictureAvailability,
+    airPlay: providerCheck,
+    customControls: customControlsAvailability
+  });
+
+  const isStale = (thisGeneration: number, player?: VimeoSdkPlayer): boolean =>
+    destroyed ||
+    thisGeneration !== generation ||
+    (player !== undefined && player !== activePlayer);
+
+  const teardown = (): void => {
+    const player = activePlayer;
+    const iframe = activeIframe;
+    activePlayer = undefined;
+    activeIframe = undefined;
+    if (player) {
+      try {
+        void Promise.resolve(player.destroy()).catch(() => undefined);
+      } catch {
+        // Teardown must not escape the provider boundary.
+      }
+    }
+    iframe?.remove();
+  };
+
+  const wireEvents = (player: VimeoSdkPlayer, thisGeneration: number): void => {
+    const on = (name: string, listener: (data?: unknown) => void): void =>
+      player.on(name, (data?: unknown) => {
+        if (isStale(thisGeneration, player)) return;
+        listener(data);
+      });
+
+    on('play', (data) => {
+      const seconds = numberField(data, 'seconds');
+      if (seconds !== undefined) currentTime = seconds;
+      emit(
+        {
+          playback: 'playing',
+          buffering: false,
+          ...(seconds === undefined ? {} : { currentTime: seconds })
+        },
+        event('play', undefined, data)
+      );
+    });
+    on('playing', () => emit({ playback: 'playing', buffering: false }));
+    on('pause', (data) => {
+      if (numberField(data, 'percent') === 1) return;
+      const seconds = numberField(data, 'seconds');
+      if (seconds !== undefined) currentTime = seconds;
+      emit(
+        {
+          playback: 'paused',
+          ...(seconds === undefined ? {} : { currentTime: seconds })
+        },
+        event('pause', undefined, data)
+      );
+    });
+    on('ended', (data) => {
+      const seconds = numberField(data, 'seconds') ?? duration ?? currentTime;
+      currentTime = seconds;
+      emit(
+        { playback: 'ended', buffering: false, currentTime: seconds },
+        event('ended', undefined, data)
+      );
+    });
+    on('timeupdate', (data) => {
+      const seconds = numberField(data, 'seconds');
+      const nextDuration = numberField(data, 'duration');
+      if (seconds === undefined) return;
+      currentTime = seconds;
+      if (nextDuration !== undefined) duration = nextDuration;
+      emit({
+        currentTime: seconds,
+        ...(nextDuration === undefined ? {} : { duration: nextDuration })
+      });
+    });
+    on('progress', (data) => {
+      const seconds = numberField(data, 'seconds');
+      if (seconds === undefined) return;
+      emit({ buffered: [{ start: 0, end: seconds }] });
+    });
+    on('bufferstart', () => emit({ buffering: true }));
+    on('bufferend', () => emit({ buffering: false }));
+    on('seeking', (data) => {
+      const seconds = numberField(data, 'seconds') ?? currentTime;
+      emit({ seeking: true }, event('seeking', { currentTime: seconds }, data));
+    });
+    on('seeked', (data) => {
+      const seconds = numberField(data, 'seconds') ?? currentTime;
+      currentTime = seconds;
+      emit(
+        { seeking: false, currentTime: seconds },
+        event('seeked', { currentTime: seconds }, data)
+      );
+    });
+    on('volumechange', (data) => {
+      const volume = numberField(data, 'volume');
+      if (volume === undefined) return;
+      void player.getMuted().then(
+        (muted) => {
+          if (isStale(thisGeneration, player)) return;
+          emit(
+            { muted, volume },
+            event('volumechange', { muted, volume }, data)
+          );
+        },
+        () => undefined
+      );
+    });
+    on('playbackratechange', (data) => {
+      const playbackRate = numberField(data, 'playbackRate');
+      if (playbackRate === undefined) return;
+      emit({ playbackRate }, event('ratechange', { playbackRate }, data));
+    });
+    on('durationchange', (data) => {
+      const nextDuration = numberField(data, 'duration');
+      if (nextDuration === undefined) return;
+      duration = nextDuration;
+      emit({
+        duration: nextDuration,
+        seekable: [{ start: 0, end: nextDuration }]
+      });
+    });
+    on('fullscreenchange', (data) => {
+      const fullscreen = asRecord(data).fullscreen === true;
+      emit({ fullscreen }, event('fullscreenchange', { fullscreen }, data));
+    });
+    on('enterpictureinpicture', (data) =>
+      emit(
+        { pictureInPicture: true },
+        event('pictureinpicturechange', { pictureInPicture: true }, data)
+      )
+    );
+    on('leavepictureinpicture', (data) =>
+      emit(
+        { pictureInPicture: false },
+        event('pictureinpicturechange', { pictureInPicture: false }, data)
+      )
+    );
+    on('error', (data) => {
+      const record = asRecord(data);
+      if (typeof record.method === 'string') return;
+      const error = loadFailure(
+        Object.assign(new Error(), {
+          name: typeof record.name === 'string' ? record.name : 'Error',
+          message:
+            typeof record.message === 'string'
+              ? record.message
+              : 'The Vimeo player reported an error.'
+        })
+      );
+      emit(
+        {
+          lifecycle: 'error',
+          activation: 'error',
+          playback: 'paused',
+          buffering: false,
+          seeking: false,
+          error
+        },
+        event('error', error, data)
+      );
+    });
+  };
+
+  const start = async (thisGeneration: number): Promise<CommandResult> => {
+    try {
+      const Sdk = await loadVimeoSdk();
+      if (isStale(thisGeneration)) return { ok: true };
+      const iframe = mount.ownerDocument.createElement('iframe');
+      iframe.src = vimeoEmbedUrl(source, options, mount.muted);
+      iframe.setAttribute(
+        'allow',
+        'autoplay; fullscreen; picture-in-picture; encrypted-media'
+      );
+      iframe.setAttribute('allowfullscreen', '');
+      iframe.setAttribute('title', 'Vimeo video player');
+      iframe.style.position = 'absolute';
+      iframe.style.inset = '0';
+      iframe.style.width = '100%';
+      iframe.style.height = '100%';
+      iframe.style.border = '0';
+      mount.appendChild(iframe);
+      const player = new Sdk(iframe);
+      activePlayer = player;
+      activeIframe = iframe;
+      wireEvents(player, thisGeneration);
+      const availabilityPromise =
+        options.controls === true
+          ? Promise.resolve<Availability>({
+              status: 'unavailable',
+              reason: 'provider'
+            })
+          : settleWithFallback(
+              chromelessAvailability(source),
+              providerCheck,
+              4000
+            );
+      await player.ready();
+      if (isStale(thisGeneration, player)) return { ok: true };
+      const [
+        initialDuration,
+        initialMuted,
+        initialVolume,
+        initialPlaybackRate,
+        initialTracks,
+        chromeless
+      ] = await Promise.all([
+        player.getDuration().catch(() => null),
+        player.getMuted().catch(() => mount.muted ?? false),
+        player.getVolume().catch(() => mount.volume ?? 1),
+        player.getPlaybackRate().catch(() => mount.playbackRate ?? 1),
+        player
+          .getTextTracks()
+          .catch((): ReadonlyArray<VimeoSdkTextTrack> => []),
+        availabilityPromise
+      ]);
+      if (isStale(thisGeneration, player)) return { ok: true };
+      duration = initialDuration;
+      textTracks = initialTracks;
+      textTrackAvailability =
+        initialTracks.length > 0
+          ? available
+          : { status: 'unavailable', reason: 'source' };
+      customControlsAvailability = chromeless;
+      if (
+        mount.volume !== undefined &&
+        Number.isFinite(mount.volume) &&
+        mount.volume !== initialVolume
+      ) {
+        void player
+          .setVolume(Math.min(1, Math.max(0, mount.volume)))
+          .catch(() => undefined);
+      }
+      if (
+        mount.playbackRate !== undefined &&
+        Number.isFinite(mount.playbackRate) &&
+        mount.playbackRate > 0 &&
+        mount.playbackRate !== initialPlaybackRate
+      ) {
+        void player.setPlaybackRate(mount.playbackRate).catch(() => undefined);
+      }
+      emit(
+        {
+          lifecycle: 'ready',
+          activation: 'ready',
+          playback: 'paused',
+          buffering: false,
+          seeking: false,
+          currentTime,
+          duration,
+          muted: initialMuted,
+          volume: initialVolume,
+          playbackRate: initialPlaybackRate,
+          ...(duration === null
+            ? {}
+            : { seekable: [{ start: 0, end: duration }] }),
+          capabilities: capabilities()
+        },
+        event('ready', undefined)
+      );
+      return { ok: true };
+    } catch (cause) {
+      if (isStale(thisGeneration)) return { ok: true };
+      teardown();
+      const error = loadFailure(cause);
+      emit(
+        { lifecycle: 'error', activation: 'error', error },
+        event('error', error)
+      );
+      return { ok: false, reason: 'provider-error', error };
+    }
+  };
+
+  const runCommand = async (
+    command: (player: VimeoSdkPlayer) => Promise<unknown>
+  ): Promise<CommandResult> => {
+    const player = activePlayer;
+    if (destroyed || !player) return { ok: false, reason: 'not-ready' };
+    try {
+      await command(player);
+      return { ok: true };
+    } catch (cause) {
+      return commandFailure(cause);
+    }
+  };
+
+  return {
+    provider: 'vimeo',
+    attach: () => {
+      if (attached || destroyed) return;
+      attached = true;
+    },
+    load: async () => {
+      if (destroyed || started) return;
+      started = true;
+      await start(++generation);
+    },
+    destroy: () => {
+      if (destroyed) return;
+      destroyed = true;
+      ++generation;
+      teardown();
+      listeners.clear();
+    },
+    subscribe: (listener) => {
+      listeners.add(listener);
+      return () => listeners.delete(listener);
+    },
+    play: () => runCommand((player) => player.play()),
+    pause: () => runCommand((player) => player.pause()),
+    seekTo: (time) => {
+      if (!Number.isFinite(time))
+        return Promise.resolve({ ok: false, reason: 'provider-error' });
+      return runCommand((player) => player.setCurrentTime(time));
+    },
+    seekBy: (offset) => {
+      if (!Number.isFinite(offset))
+        return Promise.resolve({ ok: false, reason: 'provider-error' });
+      const target = Math.max(
+        0,
+        duration === null
+          ? currentTime + offset
+          : Math.min(duration, currentTime + offset)
+      );
+      return runCommand((player) => player.setCurrentTime(target));
+    },
+    mute: () => runCommand((player) => player.setMuted(true)),
+    unmute: () => runCommand((player) => player.setMuted(false)),
+    setVolume: async (volume) => {
+      if (!Number.isFinite(volume))
+        return { ok: false, reason: 'provider-error' };
+      const result = await runCommand((player) =>
+        player.setVolume(Math.min(1, Math.max(0, volume)))
+      );
+      if (!result.ok && result.reason === 'unsupported') {
+        volumeAvailability = { status: 'unavailable', reason: 'provider' };
+        emit({ capabilities: capabilities() });
+      }
+      return result;
+    },
+    setPlaybackRate: async (rate) => {
+      if (!Number.isFinite(rate) || rate <= 0)
+        return { ok: false, reason: 'provider-error' };
+      const result = await runCommand((player) => player.setPlaybackRate(rate));
+      if (!result.ok && result.reason === 'unsupported') {
+        playbackRateAvailability = {
+          status: 'unavailable',
+          reason: 'provider-plan'
+        };
+        emit({ capabilities: capabilities() });
+      }
+      return result;
+    },
+    selectTextTrack: (track) => {
+      if (track === null) {
+        return runCommand((player) => player.disableTextTrack());
+      }
+      const match = textTracks.find(
+        (candidate) => candidate.language === track
+      );
+      if (!match) return Promise.resolve({ ok: false, reason: 'unsupported' });
+      return runCommand((player) =>
+        player.enableTextTrack(match.language, match.kind)
+      );
+    },
+    requestFullscreen: () => runCommand((player) => player.requestFullscreen()),
+    exitFullscreen: () => runCommand((player) => player.exitFullscreen()),
+    requestPictureInPicture: async () => {
+      const result = await runCommand((player) =>
+        player.requestPictureInPicture()
+      );
+      if (!result.ok && result.reason === 'unsupported') {
+        pictureInPictureAvailability = {
+          status: 'unavailable',
+          reason: 'provider'
+        };
+        emit({ capabilities: capabilities() });
+      }
+      return result;
+    },
+    exitPictureInPicture: () =>
+      runCommand((player) => player.exitPictureInPicture()),
+    retry: async () => {
+      if (destroyed) return { ok: false, reason: 'not-ready' };
+      const thisGeneration = ++generation;
+      teardown();
+      started = true;
+      return start(thisGeneration);
+    }
+  };
+};

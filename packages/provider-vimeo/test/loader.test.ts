@@ -17,7 +17,7 @@ type Deferred<Value> = {
   reject: (cause: unknown) => void;
 };
 
-const deferred = <Value,>(): Deferred<Value> => {
+const deferred = <Value>(): Deferred<Value> => {
   let resolve!: (value: Value) => void;
   let reject!: (cause: unknown) => void;
   const promise = new Promise<Value>((nextResolve, nextReject) => {
