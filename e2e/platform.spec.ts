@@ -87,23 +87,27 @@ test('platform AirPlay capability is WebKit-only and gates the picker control', 
   browserName,
   page
 }) => {
-  await page.goto('/', { waitUntil: 'domcontentloaded' });
+  // The AirPlay demo control is gated behind ?airplay=demo so it never adds a
+  // second page-global "Play"-named button to the default fixture.
+  await page.goto('/?airplay=demo', { waitUntil: 'domcontentloaded' });
   await awaitCapabilityResolution(page);
 
-  const airPlayStatus = await capabilities(page).getAttribute(
-    'data-airplay-status'
+  // AirPlay availability is API-support driven, so the reported capability must
+  // match what the current engine actually exposes. Real route availability and
+  // the picker UI are covered by the manual device matrix.
+  const expected = await environmentExpectation(page);
+  await expect(capabilities(page)).toHaveAttribute(
+    'data-airplay-status',
+    expected.airPlay
   );
   await expect(page.getByTestId('airplay-picker')).toHaveCount(
-    airPlayStatus === 'available' ? 1 : 0
+    expected.airPlay === 'available' ? 1 : 0
   );
 
-  if (browserName === 'webkit') {
-    expect(airPlayStatus).toBe('available');
-  }
   if (browserName === 'chromium' || browserName === 'firefox') {
-    // Only WebKit exposes a programmatic AirPlay route picker. The actual
-    // picker UI and route selection run in the manual device matrix.
-    expect(airPlayStatus).toBe('unavailable');
+    // Only WebKit exposes a programmatic AirPlay route picker; everywhere else
+    // the capability is unavailable with reason browser.
+    expect(expected.airPlay).toBe('unavailable');
     await expect(capabilities(page)).toHaveAttribute(
       'data-airplay-reason',
       'browser'

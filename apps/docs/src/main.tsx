@@ -29,6 +29,10 @@ const preload: Player.PlayerPreload =
     ? preloadParameter
     : 'metadata';
 const defaultMuted = parameters.get('defaultMuted') === 'true';
+// The AirPlay demo control is gated so the default fixture keeps a single
+// page-global "Play" button: "AirPlay" matches getByRole('button', {name:'Play'})
+// as a substring, which would otherwise break the default-fixture specs.
+const airplayDemo = parameters.get('airplay') === 'demo';
 const sourceChange = parameters.get('sourceChange') === 'external';
 const engineParameter = parameters.get('engine');
 const hlsEngine: 'auto' | 'native' | 'hls.js' =
@@ -123,7 +127,7 @@ const PresentationControls = () => {
             : 'Enter picture-in-picture'}
         </button>
       ) : null}{' '}
-      {presentation.airPlayStatus === 'available' ? (
+      {airplayDemo && presentation.airPlayStatus === 'available' ? (
         <button
           data-testid="airplay-picker"
           onClick={() => void actions.showAirPlayPicker()}
