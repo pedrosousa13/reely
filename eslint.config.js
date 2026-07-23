@@ -11,7 +11,9 @@ export default tseslint.config(
       'playwright-report/**',
       'test-results/**',
       '.superpowers/**',
-      'docs/superpowers/plans/**'
+      'docs/superpowers/plans/**',
+      // MPEG-TS media segments share the .ts extension with TypeScript.
+      'apps/docs/public/hls/**'
     ]
   },
   js.configs.recommended,

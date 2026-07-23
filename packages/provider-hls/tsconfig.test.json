@@ -8,8 +8,8 @@
   },
   "references": [
     { "path": "../core" },
-    { "path": "../provider-hls" },
-    { "path": "../provider-native" }
+    { "path": "../provider-native" },
+    { "path": "./tsconfig.json" }
   ],
   "include": ["src", "test"]
 }

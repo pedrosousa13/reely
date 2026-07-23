@@ -1,0 +1,24 @@
+{
+  "name": "@reely/provider-hls",
+  "version": "0.0.0",
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "dependencies": {
+    "@reely/core": "workspace:*",
+    "@reely/provider-native": "workspace:*",
+    "hls.js": "1.6.16"
+  },
+  "scripts": {
+    "build": "vite build && tsc -b",
+    "test": "vitest run --config ../../vitest.config.ts packages/provider-hls/test"
+  }
+}

@@ -17,3 +17,22 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm exec playwright install --with-deps chromium firefox webkit
       - run: pnpm format:check && pnpm lint && pnpm typecheck && pnpm test && pnpm test:e2e && pnpm build && pnpm test:packages && pnpm test:bundle && pnpm test:integrations
+
+  # Native-HLS WebKit coverage needs Safari's media stack: Playwright's Linux
+  # WebKit has neither native HLS nor the proprietary codecs, so these tests
+  # can only run on a macOS runner (slower to schedule and billed at a higher
+  # multiplier — keep this job scoped to the WebKit HLS suite).
+  hls-native-webkit:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: corepack enable
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm exec playwright install webkit
+      # pnpm appends a literal `--` to compound scripts, which playwright would
+      # misread as a file filter, so the flags are appended without it.
+      - run: pnpm test:e2e --project=webkit --grep hls

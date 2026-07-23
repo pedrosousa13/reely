@@ -12,6 +12,9 @@ export default defineConfig({
       '@reely/provider-native': fileURLToPath(
         new URL('../../packages/provider-native/src/index.ts', import.meta.url)
       ),
+      '@reely/provider-hls': fileURLToPath(
+        new URL('../../packages/provider-hls/src/index.ts', import.meta.url)
+      ),
       '@reely/react': fileURLToPath(
         new URL('../../packages/react/src/index.tsx', import.meta.url)
       )

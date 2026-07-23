@@ -953,6 +953,31 @@ test('real loader returns a Promise and rejects a missing media mount', async ()
   await expect(result).rejects.toThrow(/requires a media mount/i);
 });
 
+test('real loader routes hls sources to the hls provider adapter', async () => {
+  const actual = await vi.importActual<
+    typeof import('../src/provider-loaders')
+  >('../src/provider-loaders');
+  const detectedSource = detectSource('/hls/master.m3u8');
+  if (detectedSource.status !== 'success') {
+    throw new Error('The hls test source was not detected.');
+  }
+
+  const adapter = await actual.loadProvider({
+    media: document.createElement('video'),
+    nativeOptions: {},
+    source: detectedSource.source
+  });
+  expect(adapter.provider).toBe('hls');
+
+  await expect(
+    actual.loadProvider({
+      media: null,
+      nativeOptions: {},
+      source: detectedSource.source
+    })
+  ).rejects.toThrow(/requires a media mount/i);
+});
+
 test('incompatible autoplay commit discards a resolving interaction loader', async () => {
   const stale = createFakeProvider();
   const controller = new PlayerController();

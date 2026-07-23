@@ -24,11 +24,19 @@ const preload: Player.PlayerPreload =
     : 'metadata';
 const defaultMuted = parameters.get('defaultMuted') === 'true';
 const sourceChange = parameters.get('sourceChange') === 'external';
-const activationSource = sourceChange
-  ? 'https://provider.invalid/source-a.mp4'
-  : parameters.get('activationSource') === 'external'
-    ? 'https://provider.invalid/tracer.mp4'
-    : '/tracer.mp4';
+const engineParameter = parameters.get('engine');
+const hlsEngine: 'auto' | 'native' | 'hls.js' =
+  engineParameter === 'native' || engineParameter === 'hls.js'
+    ? engineParameter
+    : 'auto';
+const activationSource: Player.RootProps['source'] =
+  parameters.get('source') === 'hls'
+    ? { type: 'hls', src: '/hls/master.m3u8', engine: hlsEngine }
+    : sourceChange
+      ? 'https://provider.invalid/source-a.mp4'
+      : parameters.get('activationSource') === 'external'
+        ? 'https://provider.invalid/tracer.mp4'
+        : '/tracer.mp4';
 const replacementSource = sourceChange
   ? 'https://provider.invalid/source-b.mp4'
   : null;
@@ -100,6 +108,19 @@ const PresentationControls = () => {
   );
 };
 
+const StateProbes = () => {
+  const { engine, errorCategory } = Player.usePlayerState((state) => ({
+    engine: state.hlsEngine,
+    errorCategory: state.error?.category ?? null
+  }));
+  return (
+    <p>
+      Engine: <span data-testid="hls-engine">{engine ?? 'none'}</span> · Error:{' '}
+      <span data-testid="error-category">{errorCategory ?? 'none'}</span>
+    </p>
+  );
+};
+
 const PlayerFixture = () => {
   const [source, setSource] = useState(activationSource);
 
@@ -136,6 +157,7 @@ const PlayerFixture = () => {
         </Player.Viewport>
         <Player.PlayButton />
         <PresentationControls />
+        <StateProbes />
       </Player.Root>
       {replacementSource && source !== replacementSource ? (
         <button onClick={() => setSource(replacementSource)} type="button">
@@ -241,8 +263,114 @@ const App = () => (
     <p>
       <code>Player.Root</code> accepts MP4, WebM, HLS, YouTube, and Vimeo
       strings, or an explicit source object. The native tracer above remains a
-      working MP4 example. HLS and provider sources are detected in this issue,
-      but <code>Player.Media</code> does not load them yet.
+      working MP4 example. HLS VOD sources load through the HLS provider;
+      YouTube and Vimeo sources are detected but not loaded yet.
+    </p>
+    <h2>HLS</h2>
+    <p>
+      HLS is native first: where the browser plays HLS natively (Safari, iOS)
+      the native media element is used unchanged and hls.js is never downloaded.
+      Everywhere else the provider dynamically imports hls.js and drives
+      playback through Media Source Extensions. A consumer who never plays HLS
+      ships zero hls.js bytes.
+    </p>
+    <pre>{`// Auto engine selection (default)
+<Player.Root source="/hls/master.m3u8">...</Player.Root>
+
+// Forced engine
+<Player.Root source={{ type: 'hls', src: '/hls/master.m3u8', engine: 'hls.js' }}>
+  ...
+</Player.Root>`}</pre>
+    <p>Engine selection matrix for the source&apos;s optional engine field:</p>
+    <table>
+      <thead>
+        <tr>
+          <th>Engine</th>
+          <th>Native HLS support</th>
+          <th>MSE only</th>
+          <th>Neither</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>
+            <code>auto</code> (default)
+          </td>
+          <td>native</td>
+          <td>hls.js (dynamic import)</td>
+          <td>
+            fatal <code>unsupported</code> error
+          </td>
+        </tr>
+        <tr>
+          <td>
+            <code>native</code>
+          </td>
+          <td>native</td>
+          <td>
+            fatal <code>unsupported</code> error
+          </td>
+          <td>
+            fatal <code>unsupported</code> error
+          </td>
+        </tr>
+        <tr>
+          <td>
+            <code>hls.js</code>
+          </td>
+          <td>hls.js (dynamic import)</td>
+          <td>hls.js (dynamic import)</td>
+          <td>
+            fatal <code>unsupported</code> error
+          </td>
+        </tr>
+      </tbody>
+    </table>
+    <p>
+      The effective engine is inspectable as{' '}
+      <code>state.hlsEngine: 'native' | 'hls.js' | null</code>. Forced engines
+      never silently fall back: an impossible engine surfaces a normalized fatal{' '}
+      <code>unsupported</code> error that names the forced engine.
+    </p>
+    <h3>Serving requirements</h3>
+    <p>
+      Serve playlists as <code>application/vnd.apple.mpegurl</code> (or keep the{' '}
+      <code>.m3u8</code> extension) and MPEG-TS segments as{' '}
+      <code>video/mp2t</code>. When the manifest lives on another origin, CORS
+      must allow the player origin with <code>Access-Control-Allow-Origin</code>{' '}
+      on the manifest, every media playlist, and every segment: hls.js fetches
+      them all with XHR, and Safari&apos;s native engine performs its own
+      cross-origin manifest and segment requests.
+    </p>
+    <h3>Adaptation and quality</h3>
+    <p>
+      Both engines adapt between renditions automatically as bandwidth changes.
+      The current rendition is reported as <code>state.quality</code> (height,
+      width, bitrate) on the hls.js engine. Quality capability is honest per
+      engine: hls.js reports <code>selectQuality</code> as available once the
+      manifest is parsed and <code>selectQuality(height)</code> pins a rendition
+      (<code>selectQuality(null)</code> returns to automatic adaptation). Native
+      HLS offers no manual rendition selection, so the capability reports{' '}
+      <code>unavailable</code> with reason <code>provider</code> and{' '}
+      <code>state.quality</code> stays null there.
+    </p>
+    <pre>{`const quality = Player.usePlayerState((state) => state.quality)
+const { selectQuality } = Player.usePlayerActions()
+
+await selectQuality(180) // pin the 180p rendition (hls.js engine)
+await selectQuality(null) // back to automatic adaptation`}</pre>
+    <h3>Failure modes</h3>
+    <p>
+      Fatal hls.js errors follow a bounded recovery table: up to two{' '}
+      <code>startLoad</code> retries for fatal network errors and up to two{' '}
+      <code>recoverMediaError</code> attempts for fatal media errors. When
+      recovery is exhausted the player surfaces one normalized fatal error (
+      <code>network</code> or <code>decode</code>) instead of retrying forever,
+      and <code>retry()</code> remains functional: it tears the hls.js instance
+      down and restarts with fresh recovery budgets. Unsupported environments
+      surface <code>unsupported</code>; on the native engine, media element
+      errors map to <code>network</code>, <code>decode</code>, or{' '}
+      <code>source</code> exactly as for MP4 playback.
     </p>
     <h2>Playback API</h2>
     <p>

@@ -2,15 +2,9 @@ import { defineConfig } from 'vite';
 
 export default defineConfig({
   build: {
-    lib: { entry: 'src/index.tsx', formats: ['es'], fileName: 'index' },
+    lib: { entry: 'src/index.ts', formats: ['es'], fileName: 'index' },
     rollupOptions: {
-      external: [
-        'react',
-        'react/jsx-runtime',
-        '@reely/core',
-        '@reely/provider-hls',
-        '@reely/provider-native'
-      ]
+      external: ['@reely/core', '@reely/provider-native', 'hls.js']
     },
     sourcemap: true,
     // tsc -b emits declarations into dist incrementally; letting Vite empty

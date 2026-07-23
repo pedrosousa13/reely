@@ -46,6 +46,14 @@ export type TimeRange = { readonly start: number; readonly end: number };
 
 export type PlayerProvider = 'native' | 'hls' | 'youtube' | 'vimeo';
 
+export type HlsEngine = 'native' | 'hls.js';
+
+export type PlayerQuality = {
+  readonly height: number | null;
+  readonly width: number | null;
+  readonly bitrate: number | null;
+};
+
 export type PlayerCapabilities = {
   readonly seek: Availability;
   readonly setVolume: Availability;
@@ -76,6 +84,8 @@ export type PlayerState = {
   readonly pictureInPicture: boolean;
   readonly autoplay: 'idle' | 'attempting' | 'started' | 'blocked' | 'failed';
   readonly provider: PlayerProvider | null;
+  readonly hlsEngine: HlsEngine | null;
+  readonly quality: PlayerQuality | null;
   readonly capabilities: PlayerCapabilities;
   readonly error: PlayerError | null;
 };
@@ -195,6 +205,7 @@ export type ProviderAdapter = {
   pause?: () => Promise<CommandResult>;
   seekTo?: (time: number) => Promise<CommandResult>;
   seekBy?: (offset: number) => Promise<CommandResult>;
+  selectQuality?: (height: number | null) => Promise<CommandResult>;
   mute?: () => Promise<CommandResult>;
   unmute?: () => Promise<CommandResult>;
   setVolume?: (volume: number) => Promise<CommandResult>;
@@ -264,6 +275,8 @@ export const createInitialPlayerState = (): PlayerState =>
     pictureInPicture: false,
     autoplay: 'idle',
     provider: null,
+    hlsEngine: null,
+    quality: null,
     capabilities: initialCapabilities(),
     error: null
   });
@@ -749,6 +762,8 @@ export class PlayerController {
     this.#command('seekTo', time);
   seekBy = (offset: number): Promise<CommandResult> =>
     this.#command('seekBy', offset);
+  selectQuality = (height: number | null): Promise<CommandResult> =>
+    this.#command('selectQuality', height);
   mute = (): Promise<CommandResult> => this.#command('mute');
   unmute = (): Promise<CommandResult> => this.#command('unmute');
   toggleMuted = (): Promise<CommandResult> =>
@@ -812,6 +827,7 @@ export class PlayerController {
       | 'pause'
       | 'seekTo'
       | 'seekBy'
+      | 'selectQuality'
       | 'mute'
       | 'unmute'
       | 'setVolume'
@@ -838,6 +854,7 @@ export class PlayerController {
       | 'pause'
       | 'seekTo'
       | 'seekBy'
+      | 'selectQuality'
       | 'mute'
       | 'unmute'
       | 'setVolume'
@@ -892,6 +909,12 @@ export class PlayerController {
         patch.capabilities === undefined
           ? this.#state.capabilities
           : freezeCapabilities(patch.capabilities),
+      quality:
+        patch.quality === undefined
+          ? this.#state.quality
+          : patch.quality === null
+            ? null
+            : Object.freeze({ ...patch.quality }),
       autoplay: this.#hasAutoplayConfigurationError
         ? 'failed'
         : patch.playback === 'playing' && this.#state.autoplay === 'attempting'

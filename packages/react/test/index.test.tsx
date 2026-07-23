@@ -822,8 +822,47 @@ test('renders every explicit video source in order with its MIME type', () => {
   ]);
 });
 
+test('remounts media and resets confirmed playing state after a transition to HLS', () => {
+  const source = { type: 'hls' as const, src: '/master.m3u8' };
+  const player = (playerSource: '/tracer.mp4' | typeof source) => (
+    <LegacyRoot source={playerSource}>
+      <Player.Media />
+      <Player.PlayButton />
+    </LegacyRoot>
+  );
+  const { rerender } = render(player('/tracer.mp4'));
+  const media = screen.getByLabelText('Reely media');
+
+  fireEvent.play(media);
+  expect(screen.getByRole('button', { name: 'Pause' })).toBeDefined();
+
+  rerender(player(source));
+
+  const remounted = screen.getByLabelText('Reely media');
+  expect(remounted).not.toBe(media);
+  expect(remounted.querySelectorAll('source')).toHaveLength(0);
+  expect(
+    screen
+      .getByRole('button', { name: 'Play' })
+      .getAttribute('data-playback-state')
+  ).toBe('paused');
+});
+
+test('renders hls sources as a bare video mount with quality actions exposed', () => {
+  const handle = createRef<Player.PlayerHandle>();
+  render(
+    <LegacyRoot ref={handle} source={{ type: 'hls', src: '/hls/master.m3u8' }}>
+      <Player.Media nativePoster="/poster.jpg" />
+    </LegacyRoot>
+  );
+
+  const media = screen.getByLabelText('Reely media');
+  expect(media.querySelectorAll('source')).toHaveLength(0);
+  expect(media.getAttribute('poster')).toBe('/poster.jpg');
+  expect(typeof handle.current?.selectQuality).toBe('function');
+});
+
 test.each([
-  ['HLS', { type: 'hls' as const, src: '/master.m3u8' }],
   ['provider', { type: 'youtube' as const, videoId: 'dQw4w9WgXcQ' }],
   ['detection failure', 'source-without-extension']
 ])(
@@ -1522,7 +1561,9 @@ test('forwards nativePoster only to native videos and server-renders poster mark
     '/updated.jpg'
   );
   rerender(player({ type: 'hls', src: '/master.m3u8' }, '/fallback.jpg'));
-  expect(screen.queryByLabelText('Reely media')).toBeNull();
+  expect(screen.getByLabelText('Reely media').getAttribute('poster')).toBe(
+    '/fallback.jpg'
+  );
   rerender(
     player({ type: 'youtube', videoId: 'dQw4w9WgXcQ' }, '/fallback.jpg')
   );
