@@ -147,6 +147,19 @@ export const useActivation = (
   const activateFromInteraction = useCallback(() => {
     const current = optionsRef.current;
     if (current.loading !== 'interaction' || current.autoplay !== false) return;
+    const activation = current.controller.getState().activation;
+    if (activation === 'error') {
+      const active = session.current;
+      active.generation += 1;
+      active.started = true;
+      active.queuedPlay = true;
+      loadingGeneration.current = undefined;
+      current.controller.setProvider(undefined);
+      current.controller.setActivation({ activation: 'eligible' });
+      setMediaVersion((version) => version + 1);
+      return;
+    }
+    if (activation !== 'dormant') return;
     activate(true);
   }, [activate]);
 
@@ -298,9 +311,10 @@ export const useActivation = (
           destroyStale(adapter);
           return;
         }
-        const current = session.current;
-        if (current.queuedPlay) {
-          current.queuedPlay = false;
+        const queuePlay = session.current.queuedPlay;
+        session.current.queuedPlay = false;
+        controller.setProvider(adapter);
+        if (queuePlay) {
           const subscription: { unsubscribe?: () => void } = {};
           let armed = false;
           let disposed = false;
@@ -322,18 +336,8 @@ export const useActivation = (
           armed = true;
           if (disposed) {
             subscription.unsubscribe();
-            destroyStale(adapter);
-            return;
           }
         }
-        if (
-          !isCurrentLoad() ||
-          controller.getState().activation !== 'loading-provider'
-        ) {
-          destroyStale(adapter);
-          return;
-        }
-        controller.setProvider(adapter);
       })
       .catch((cause: unknown) => {
         if (!isCurrentLoad()) return;

@@ -1,7 +1,8 @@
 // @vitest-environment happy-dom
 
-import { act, cleanup, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { createRef, useLayoutEffect } from 'react';
+import { renderToString } from 'react-dom/server';
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 import {
   detectSource,
@@ -128,6 +129,28 @@ const fixture = (
   <Player.Root source={props.source ?? '/tracer.mp4'} {...props}>
     <Player.Viewport data-testid="viewport">
       <Player.Media />
+    </Player.Viewport>
+  </Player.Root>
+);
+
+const interactionFixture = (
+  props: Omit<Player.RootProps, 'children' | 'loading' | 'source'> & {
+    source?: Player.RootProps['source'];
+  } = {}
+) => (
+  <Player.Root
+    loading="interaction"
+    source={props.source ?? '/tracer.mp4'}
+    {...props}
+  >
+    <Player.Viewport>
+      <Player.Media />
+      <Player.Poster>
+        <span>Poster</span>
+      </Player.Poster>
+      <Player.ActivationButton />
+      <Player.LoadingIndicator />
+      <Player.PlayButton />
     </Player.Viewport>
   </Player.Root>
 );
@@ -635,4 +658,137 @@ test('incompatible autoplay commit ignores a rejecting interaction loader', asyn
     lifecycle: 'error',
     provider: null
   });
+});
+
+test('server-renders interaction control without media or loading work', () => {
+  const markup = renderToString(interactionFixture());
+
+  expect(markup).toContain('data-reely-part="activation"');
+  expect(markup).toContain('aria-label="Play video"');
+  expect(markup).toContain('data-reely-part="poster"');
+  expect(markup).not.toContain('<video');
+  expect(markup).not.toContain('data-reely-part="loading-indicator"');
+  expect(mockedLoadProvider).not.toHaveBeenCalled();
+});
+
+test('one interaction click loads and queues user-origin playback', async () => {
+  const fake = createFakeProvider();
+  mockedLoadProvider.mockResolvedValue(fake.adapter);
+  const handle = createRef<Player.PlayerHandle>();
+  render(interactionFixture({ defaultMuted: true, ref: handle }));
+
+  const activation = screen.getByRole('button', { name: 'Play video' });
+  expect(activation.dataset.state).toBe('dormant');
+  expect(screen.queryByLabelText('Reely media')).toBeNull();
+  expect(mockedLoadProvider).not.toHaveBeenCalled();
+
+  fireEvent.click(activation);
+
+  await vi.waitFor(() => expect(mockedLoadProvider).toHaveBeenCalledOnce());
+  expect(screen.getByRole('status').dataset.state).toBe('loading-provider');
+  act(() =>
+    fake.emit({
+      activation: 'ready',
+      lifecycle: 'ready',
+      muted: true
+    })
+  );
+  await vi.waitFor(() => expect(fake.counts().playCount).toBe(1));
+  expect(handle.current?.getState().muted).toBe(true);
+});
+
+test('audible blocked playback is not silently muted', async () => {
+  const fake = createFakeProvider({
+    playResult: { ok: false, reason: 'blocked' }
+  });
+  mockedLoadProvider.mockResolvedValue(fake.adapter);
+  render(interactionFixture());
+
+  fireEvent.click(screen.getByRole('button', { name: 'Play video' }));
+  await vi.waitFor(() => expect(mockedLoadProvider).toHaveBeenCalledOnce());
+  act(() =>
+    fake.emit({
+      activation: 'ready',
+      lifecycle: 'ready',
+      muted: false
+    })
+  );
+
+  await vi.waitFor(() => expect(fake.counts().playCount).toBe(1));
+  expect(screen.getByRole('button', { name: 'Play' })).toBeDefined();
+  expect(fake.counts().playCount).toBe(1);
+});
+
+test.each(['muted', 'audible'] as const)(
+  'interaction with %s autoplay is a configuration error',
+  async (autoplay) => {
+    const handle = createRef<Player.PlayerHandle>();
+    render(interactionFixture({ autoplay, ref: handle }));
+
+    await vi.waitFor(() =>
+      expect(handle.current?.getState()).toMatchObject({
+        activation: 'error',
+        error: { category: 'configuration' }
+      })
+    );
+    expect(mockedLoadProvider).not.toHaveBeenCalled();
+  }
+);
+
+test('keeps focus and retries after loader failure', async () => {
+  const current = createFakeProvider();
+  mockedLoadProvider
+    .mockRejectedValueOnce(new Error('provider import failed'))
+    .mockResolvedValueOnce(current.adapter);
+  render(interactionFixture());
+
+  const button = screen.getByRole('button', { name: 'Play video' });
+  button.focus();
+  fireEvent.click(button);
+  await screen.findByRole('button', { name: 'Retry loading video' });
+  expect(document.activeElement).toBe(button);
+
+  fireEvent.click(button);
+
+  await vi.waitFor(() => expect(mockedLoadProvider).toHaveBeenCalledTimes(2));
+  await vi.waitFor(() =>
+    expect(current.counts()).toMatchObject({ attachCount: 1, loadCount: 1 })
+  );
+});
+
+test('retries an installed provider error with one queued user play', async () => {
+  const stale = createFakeProvider();
+  const current = createFakeProvider();
+  mockedLoadProvider
+    .mockResolvedValueOnce(stale.adapter)
+    .mockResolvedValueOnce(current.adapter);
+  const handle = createRef<Player.PlayerHandle>();
+  render(interactionFixture({ ref: handle }));
+
+  const button = screen.getByRole('button', { name: 'Play video' });
+  const controller = handle.current as PlayerController;
+  const playWithOrigin = vi.spyOn(controller, 'playWithOrigin');
+  button.focus();
+  fireEvent.click(button);
+  await vi.waitFor(() =>
+    expect(stale.counts()).toMatchObject({ attachCount: 1, loadCount: 1 })
+  );
+
+  act(() => stale.emit({ activation: 'error', lifecycle: 'error' }));
+  expect(await screen.findByRole('button', { name: 'Retry loading video' })).toBe(
+    button
+  );
+  expect(document.activeElement).toBe(button);
+
+  fireEvent.click(button);
+
+  await vi.waitFor(() => expect(stale.counts().destroyCount).toBe(1));
+  await vi.waitFor(() => expect(mockedLoadProvider).toHaveBeenCalledTimes(2));
+  await vi.waitFor(() =>
+    expect(current.counts()).toMatchObject({ attachCount: 1, loadCount: 1 })
+  );
+  act(() => current.emit({ activation: 'ready', lifecycle: 'ready' }));
+  await vi.waitFor(() =>
+    expect(playWithOrigin).toHaveBeenCalledExactlyOnceWith('user')
+  );
 });

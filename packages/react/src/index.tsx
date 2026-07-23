@@ -756,6 +756,85 @@ export const Poster = ({ children, style, ...safeRest }: PosterProps) => {
   );
 };
 
+export type ActivationButtonProps = ComponentPropsWithRef<'button'>;
+
+export const ActivationButton = ({
+  'aria-label': ariaLabel,
+  children,
+  onClick,
+  style,
+  ...props
+}: ActivationButtonProps) => {
+  const { activateFromInteraction, loading } = usePlayer();
+  const activation = usePlayerState((state) => state.activation);
+  if (loading !== 'interaction' || activation === 'ready') return null;
+  const isError = activation === 'error';
+  const isLoading = activation === 'loading-provider';
+  const label = ariaLabel ?? (isError ? 'Retry loading video' : 'Play video');
+  return (
+    <button
+      {...props}
+      aria-disabled={isLoading || undefined}
+      aria-label={label}
+      data-reely-part="activation"
+      data-state={activation}
+      onClick={(event) => {
+        onClick?.(event);
+        if (!event.defaultPrevented && !isLoading) {
+          activateFromInteraction();
+        }
+      }}
+      style={{
+        ...style,
+        position: 'absolute',
+        inset: 0,
+        zIndex: 30
+      }}
+      type="button"
+    >
+      {children ?? (isError ? 'Retry' : 'Play')}
+    </button>
+  );
+};
+
+export type LoadingIndicatorProps = ComponentPropsWithRef<'div'>;
+
+export const LoadingIndicator = ({
+  children,
+  style,
+  ...props
+}: LoadingIndicatorProps) => {
+  const { activation, buffering } = usePlayerState((state) => ({
+    activation: state.activation,
+    buffering: state.buffering
+  }));
+  const state =
+    activation === 'loading-provider'
+      ? 'loading-provider'
+      : buffering
+        ? 'buffering'
+        : null;
+  if (!state) return null;
+  return (
+    <div
+      {...props}
+      aria-live="polite"
+      data-reely-part="loading-indicator"
+      data-state={state}
+      role="status"
+      style={{
+        ...style,
+        position: 'absolute',
+        inset: 0,
+        zIndex: 30,
+        pointerEvents: 'none'
+      }}
+    >
+      {children ?? (state === 'loading-provider' ? 'Loading video' : 'Buffering')}
+    </div>
+  );
+};
+
 type PosterImageState = 'idle' | 'loading' | 'loaded' | 'error';
 
 const posterRequestKey = ({ src, srcSet, sizes }: PosterImageProps): string =>

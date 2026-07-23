@@ -8,13 +8,31 @@ const autoplay: Player.RootProps['autoplay'] =
   autoplayParameter === 'muted' || autoplayParameter === 'audible'
     ? autoplayParameter
     : false;
+const parameters = new URLSearchParams(window.location.search);
+const loadingParameter = parameters.get('loading');
+const loading: Player.PlayerLoadingStrategy =
+  loadingParameter === 'eager' ||
+  loadingParameter === 'interaction' ||
+  loadingParameter === 'viewport'
+    ? loadingParameter
+    : 'viewport';
+const activationSource =
+  parameters.get('activationSource') === 'external'
+    ? 'https://provider.invalid/tracer.mp4'
+    : '/tracer.mp4';
 
 const App = () => (
   <>
     <h1>Reely</h1>
     <p>A minimal player with explicit, inspectable media source detection.</p>
-    <Player.Root autoplay={autoplay} source="/tracer.mp4">
+    <Player.Root
+      autoplay={autoplay}
+      loading={loading}
+      preload="metadata"
+      source={activationSource}
+    >
       <Player.Viewport
+        data-testid="viewport"
         style={{ aspectRatio: '16 / 9', maxWidth: '48rem', width: '100%' }}
       >
         <Player.Poster>
@@ -31,10 +49,42 @@ const App = () => (
             width={1280}
           />
         </Player.Poster>
+        <Player.ActivationButton />
+        <Player.LoadingIndicator />
         <Player.Media />
       </Player.Viewport>
       <Player.PlayButton />
     </Player.Root>
+    <h2>Activation loading</h2>
+    <p>
+      A poster&apos;s <code>loading</code> and <code>fetchPriority</code>{' '}
+      control only the image. Root <code>loading</code> controls provider
+      activation, while Root <code>preload</code> controls native media only
+      after activation.
+    </p>
+    <p>
+      Root defaults to viewport loading with a <code>200px 0px</code> viewport
+      margin. Interaction loading is incompatible with autoplay: it reports a
+      recoverable configuration error instead of importing a provider.
+    </p>
+    <p>
+      With interaction loading, there is no provider contact before the click.
+      That click queues playback with the user&apos;s current muted preference;
+      blocked audible playback remains blocked and is never silently retried as
+      muted. Source changes and Retry invalidate stale loading attempts.
+    </p>
+    <pre>{`<Player.Root
+  source={source}
+  loading="interaction"
+  preload="metadata"
+>
+  <Player.Viewport>
+    <Player.Media />
+    <Player.Poster>{poster}</Player.Poster>
+    <Player.ActivationButton />
+    <Player.LoadingIndicator />
+  </Player.Viewport>
+</Player.Root>`}</pre>
     <h2>Posters</h2>
     <p>
       The decorative <code>Player.Poster</code> sits inside the viewport before
