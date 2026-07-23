@@ -38,7 +38,10 @@ type FakePlayerHarness = {
 
 const createFakeYouTube = () => {
   const players: FakePlayerHarness[] = [];
-  const Player = function (element: HTMLElement, options: YouTubePlayerOptions) {
+  const Player = function (
+    element: HTMLElement,
+    options: YouTubePlayerOptions
+  ) {
     const iframe = document.createElement('iframe');
     // A real src would make happy-dom fetch the embed; keep the suite offline.
     iframe.dataset.embedSrc = `${options.host ?? 'https://www.youtube.com'}/embed/${
@@ -82,8 +85,7 @@ const createFakeYouTube = () => {
           iframe.remove();
         })
       },
-      fireReady: () =>
-        options.events?.onReady?.({ target: harness.player }),
+      fireReady: () => options.events?.onReady?.({ target: harness.player }),
       fireStateChange: (data) => {
         harness.state = data;
         options.events?.onStateChange?.({ data, target: harness.player });
@@ -204,9 +206,11 @@ test('maps player ready onto confirmed state and honest capabilities', async () 
   harness.muted = true;
   harness.volume = 40;
   harness.rate = 1.5;
-  (harness.iframe as HTMLIFrameElement & {
-    requestFullscreen: () => Promise<void>;
-  }).requestFullscreen = vi.fn();
+  (
+    harness.iframe as HTMLIFrameElement & {
+      requestFullscreen: () => Promise<void>;
+    }
+  ).requestFullscreen = vi.fn();
 
   harness.fireReady();
 
@@ -266,9 +270,7 @@ test('maps YouTube player states onto confirmed playback patches and events', as
   const { events, harness, patches } = await readyAdapter();
 
   harness.fireStateChange(playerStates.BUFFERING);
-  expect(patches).toContainEqual(
-    expect.objectContaining({ buffering: true })
-  );
+  expect(patches).toContainEqual(expect.objectContaining({ buffering: true }));
 
   harness.currentTime = 12;
   harness.fireStateChange(playerStates.PLAYING);
@@ -342,9 +344,7 @@ test('seek commands validate input and confirm the reached position', async () =
 
   await expect(provider.seekTo?.(30)).resolves.toEqual({ ok: true });
   expect(harness.player.seekTo).toHaveBeenCalledWith(30, true);
-  expect(patches).toContainEqual(
-    expect.objectContaining({ currentTime: 30 })
-  );
+  expect(patches).toContainEqual(expect.objectContaining({ currentTime: 30 }));
 
   await expect(provider.seekBy?.(-10)).resolves.toEqual({ ok: true });
   expect(harness.player.seekTo).toHaveBeenLastCalledWith(20, true);
@@ -369,8 +369,9 @@ test('volume commands convert the 0-1 contract onto the YouTube 0-100 scale', as
   expect(patches).toContainEqual(
     expect.objectContaining({ muted: false, volume: 0.5 })
   );
-  expect(events.filter(({ type }) => type === 'volumechange').length)
-    .toBeGreaterThanOrEqual(3);
+  expect(
+    events.filter(({ type }) => type === 'volumechange').length
+  ).toBeGreaterThanOrEqual(3);
 
   await expect(provider.setVolume?.(Number.NaN)).resolves.toEqual({
     ok: false,
@@ -404,9 +405,11 @@ test('playback rate confirms through the provider rate-change event', async () =
 test('fullscreen targets the YouTube iframe so provider controls stay intact', async () => {
   const { harness, provider } = await readyAdapter();
   const requestFullscreen = vi.fn(() => Promise.resolve());
-  (harness.iframe as HTMLIFrameElement & {
-    requestFullscreen: () => Promise<void>;
-  }).requestFullscreen = requestFullscreen;
+  (
+    harness.iframe as HTMLIFrameElement & {
+      requestFullscreen: () => Promise<void>;
+    }
+  ).requestFullscreen = requestFullscreen;
 
   await expect(provider.requestFullscreen?.()).resolves.toEqual({ ok: true });
   expect(requestFullscreen).toHaveBeenCalledTimes(1);
@@ -430,9 +433,7 @@ test('tracks fullscreen entered from inside the YouTube iframe chrome', async ()
   });
   document.dispatchEvent(new Event('fullscreenchange'));
 
-  expect(patches).toContainEqual(
-    expect.objectContaining({ fullscreen: true })
-  );
+  expect(patches).toContainEqual(expect.objectContaining({ fullscreen: true }));
   expect(events).toContainEqual(
     expect.objectContaining({
       type: 'fullscreenchange',

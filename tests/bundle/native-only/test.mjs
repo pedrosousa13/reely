@@ -204,7 +204,9 @@ try {
       );
     }
   }
-  const youtubeRequest = requestedUrls.find((url) => isYouTubeHost(url.hostname));
+  const youtubeRequest = requestedUrls.find((url) =>
+    isYouTubeHost(url.hostname)
+  );
   if (youtubeRequest) {
     throw new Error(
       `The native fixture contacted a YouTube domain: ${youtubeRequest.href}`

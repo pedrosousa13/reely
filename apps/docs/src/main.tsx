@@ -391,10 +391,10 @@ await selectQuality(null) // back to automatic adaptation`}</pre>
     </p>
     <h2>YouTube</h2>
     <p>
-      YouTube sources load the YouTube iframe player on demand: no YouTube
-      code is in the initial bundle and no YouTube-domain request happens
-      until the activation strategy allows it. Embeds use the
-      privacy-enhanced <code>youtube-nocookie.com</code> host.
+      YouTube sources load the YouTube iframe player on demand: no YouTube code
+      is in the initial bundle and no YouTube-domain request happens until the
+      activation strategy allows it. Embeds use the privacy-enhanced{' '}
+      <code>youtube-nocookie.com</code> host.
     </p>
     <YouTubeExample />
     <pre>{`<Player.Root source="https://www.youtube.com/watch?v=M7lc1UVf-VE" loading="interaction">
@@ -406,11 +406,11 @@ await selectQuality(null) // back to automatic adaptation`}</pre>
 </Player.Root>`}</pre>
     <p>
       YouTube always uses its own player controls. YouTube&apos;s developer
-      policy prohibits blocking or obscuring standard player features
-      (branding, settings, watch-later, and so on), so Reely never overlays a
-      control layer on the iframe; <code>customControls</code> reports{' '}
-      <code>unavailable</code> with reason <code>policy</code>. This is a
-      policy constraint, not a technical one.
+      policy prohibits blocking or obscuring standard player features (branding,
+      settings, watch-later, and so on), so Reely never overlays a control layer
+      on the iframe; <code>customControls</code> reports{' '}
+      <code>unavailable</code> with reason <code>policy</code>. This is a policy
+      constraint, not a technical one.
     </p>
     <p>
       Honest limits of the iframe embed, with no parity claims against native
@@ -435,16 +435,16 @@ await selectQuality(null) // back to automatic adaptation`}</pre>
       <li>
         Autoplay follows browser policy. YouTube does not report a blocked
         autoplay attempt as an error, it just stays paused; Reely reports an
-        unconfirmed play request as <code>blocked</code> instead of
-        conflating it with a provider that is not ready.
+        unconfirmed play request as <code>blocked</code> instead of conflating
+        it with a provider that is not ready.
       </li>
       <li>
         The player lives in a cross-origin iframe: picture-in-picture and
         AirPlay report <code>unavailable</code>, volume and mute changes made
-        inside the YouTube controls are not observable as events, and
-        fullscreen wraps the whole iframe so the YouTube chrome stays
-        interactive. Entering fullscreen from the YouTube button inside the
-        iframe is still tracked through the document fullscreen state.
+        inside the YouTube controls are not observable as events, and fullscreen
+        wraps the whole iframe so the YouTube chrome stays interactive. Entering
+        fullscreen from the YouTube button inside the iframe is still tracked
+        through the document fullscreen state.
       </li>
       <li>
         Timing is polled while playing (the iframe API emits no time-update

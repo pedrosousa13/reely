@@ -11,8 +11,7 @@ const youtubeDomains = [
 
 const isYouTubeUrl = (url: URL): boolean =>
   youtubeDomains.some(
-    (domain) =>
-      url.hostname === domain || url.hostname.endsWith(`.${domain}`)
+    (domain) => url.hostname === domain || url.hostname.endsWith(`.${domain}`)
   );
 
 // A deterministic stand-in for https://www.youtube.com/iframe_api. It mirrors
@@ -104,8 +103,8 @@ test('youtube interaction activation rejects every YouTube request before the cl
   await activationButton.click();
 
   await expect
-    .poll(() =>
-      youtubeRequests.filter((url) => url.endsWith('/iframe_api')).length
+    .poll(
+      () => youtubeRequests.filter((url) => url.endsWith('/iframe_api')).length
     )
     .toBeGreaterThan(0);
   await expect
@@ -157,8 +156,8 @@ test('youtube docs example stays dormant while the native fixture is used', asyn
   await activationButton.click();
 
   await expect
-    .poll(() =>
-      youtubeRequests.filter((url) => url.endsWith('/iframe_api')).length
+    .poll(
+      () => youtubeRequests.filter((url) => url.endsWith('/iframe_api')).length
     )
     .toBeGreaterThan(0);
   await expect(
