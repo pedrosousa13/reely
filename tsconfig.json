@@ -12,6 +12,7 @@
     { "path": "./packages/provider-youtube/tsconfig.test.json" },
     { "path": "./packages/react" },
     { "path": "./packages/react/tsconfig.test.json" },
-    { "path": "./apps/docs" }
+    { "path": "./apps/docs" },
+    { "path": "./apps/storybook" }
   ]
 }

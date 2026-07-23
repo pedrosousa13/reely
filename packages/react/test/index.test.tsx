@@ -19,7 +19,7 @@ import {
 import type * as React from 'react';
 import { renderToString } from 'react-dom/server';
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
-import type { ProviderAdapter } from '@reely/core';
+import { PlayerController, type ProviderAdapter } from '@reely/core';
 import type { NativePlaybackOptions } from '@reely/provider-native';
 import * as Player from '../src/index';
 
@@ -923,6 +923,37 @@ test('exposes stable actions and a ref handle backed by the Root controller', ()
     expect(event.detail.volume).toBeTypeOf('number');
   });
   expect(verifyReadonlyStateTypes).toBeTypeOf('function');
+});
+
+test('keeps the imperative handle backed by the full PlayerController', () => {
+  // The Storybook mock-player decorator (apps/storybook/.storybook/
+  // mock-player.tsx) casts PlayerHandle to PlayerController to reach the
+  // provider-facing surface (setProvider, configureAutoplay). This pins that
+  // invariant: the handle must remain the controller instance itself.
+  const handle = createRef<Player.PlayerHandle>();
+  render(
+    <Player.Root loading="interaction" ref={handle} source="/tracer.mp4">
+      {null}
+    </Player.Root>
+  );
+
+  expect(handle.current).toBeInstanceOf(PlayerController);
+  const controller = handle.current as PlayerController;
+  const adapter: ProviderAdapter = {
+    provider: 'native',
+    attach: () => undefined,
+    load: () => undefined,
+    destroy: () => undefined,
+    subscribe: () => () => undefined
+  };
+  act(() => {
+    controller.setProvider(adapter);
+  });
+  expect(controller.getState().activation).toBe('loading-provider');
+  act(() => {
+    controller.setProvider(undefined);
+  });
+  expect(controller.getState().activation).toBe('dormant');
 });
 
 test('throws a clear error when player hooks are used outside Root', () => {
