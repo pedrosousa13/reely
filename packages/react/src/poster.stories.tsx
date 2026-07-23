@@ -45,7 +45,20 @@ export const Idle: Story = {
 
 export const Loading: Story = {
   args: { src: HANGING_SRC },
-  play: async ({ canvasElement }) => posterImage('loading', canvasElement)
+  play: async ({ canvasElement }) => {
+    await posterImage('loading', canvasElement);
+    // The initial synchronous check above is trivially true the instant the
+    // component mounts (before any network event could possibly land), so it
+    // alone can't prove the endpoint hangs. Wait a real ~300ms and re-check:
+    // a 404 (or any other response) would flip data-state to 'error' well
+    // within this window — this asserts the endpoint genuinely never
+    // responds, not just that the state started out 'loading'.
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    const image = canvasElement.querySelector(
+      '[data-reely-part="poster-image"]'
+    );
+    await expect(image).toHaveAttribute('data-state', 'loading');
+  }
 };
 
 export const Loaded: Story = {
