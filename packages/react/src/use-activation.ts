@@ -14,7 +14,7 @@ import {
   useRef,
   useState
 } from 'react';
-import { loadProvider } from './provider-loaders';
+import { loadProvider } from './provider-loaders.js';
 
 export type PlayerLoadingStrategy = 'eager' | 'viewport' | 'interaction';
 export type PlayerPreload = 'none' | 'metadata' | 'auto';

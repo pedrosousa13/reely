@@ -10,6 +10,11 @@ export default defineConfig({
         '@reely/core',
         '@reely/provider-native'
       ]
-    }
+    },
+    sourcemap: true,
+    // tsc -b emits declarations into dist incrementally; letting Vite empty
+    // the directory on every build makes it silently drop them once tsc's
+    // build cache decides there is nothing left to re-emit.
+    emptyOutDir: false
   }
 });
