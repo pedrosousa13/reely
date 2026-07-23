@@ -80,6 +80,15 @@ export type PlayerState = {
   readonly error: PlayerError | null;
 };
 
+export type PreProviderActivation =
+  | {
+      readonly activation: 'dormant' | 'eligible' | 'loading-provider';
+    }
+  | {
+      readonly activation: 'error';
+      readonly error: PlayerError;
+    };
+
 export type PlayerEventOrigin =
   'user' | 'api' | 'autoplay' | 'provider' | 'system';
 
@@ -582,6 +591,21 @@ export class PlayerController {
           : this.#state.error
     });
     this.#synchronizeAutoplay();
+  };
+
+  setActivation = (next: PreProviderActivation): void => {
+    if (this.#provider) return;
+    const lifecycle =
+      next.activation === 'loading-provider'
+        ? 'loading'
+        : next.activation === 'error'
+          ? 'error'
+          : 'idle';
+    this.#applyPatch({
+      activation: next.activation,
+      lifecycle,
+      error: next.activation === 'error' ? next.error : null
+    });
   };
 
   setProvider = (provider: ProviderAdapter | undefined): void => {
