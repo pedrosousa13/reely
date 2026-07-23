@@ -80,6 +80,18 @@ importers:
 
   packages/core: {}
 
+  packages/provider-hls:
+    dependencies:
+      '@reely/core':
+        specifier: workspace:*
+        version: link:../core
+      '@reely/provider-native':
+        specifier: workspace:*
+        version: link:../provider-native
+      hls.js:
+        specifier: 1.6.16
+        version: 1.6.16
+
   packages/provider-native:
     dependencies:
       '@reely/core':
@@ -1281,6 +1293,9 @@ packages:
 
   highlight.js@10.7.3:
     resolution: {integrity: sha512-tzcUFauisWKNHaRkN4Wjl/ZA07gENAjFl3J/c480dprkGTg5EQstgaNFqBfUqCq54kZRIEcreTsAgF/m2quD7A==}
+
+  hls.js@1.6.16:
+    resolution: {integrity: sha512-VSIRpLfRwlAAdGL4wiTucx2ScRipo0ed1FBatWkyt832jC4CReKstga6yIhYVwGu9LOBjuX9wzmRMeQdBJtzEA==}
 
   human-id@4.2.0:
     resolution: {integrity: sha512-K3GbkIWqyvvlpfhBPlbEvD97TtqBpAYA4kt+cn2lD2x2HuohzZCibcA2nOlnJT6exqvJLggoB5nv2dNf192nEA==}
@@ -3200,6 +3215,8 @@ snapshots:
       hermes-estree: 0.25.1
 
   highlight.js@10.7.3: {}
+
+  hls.js@1.6.16: {}
 
   human-id@4.2.0: {}
 
