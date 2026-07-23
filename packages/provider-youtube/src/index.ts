@@ -202,6 +202,12 @@ export const createYouTubeProvider = (
   let playerTarget: HTMLElement | undefined;
   let pendingPlays: PendingPlay[] = [];
   let timeInterval: ReturnType<typeof setInterval> | undefined;
+  // The iframe API proxies commands over postMessage, so getters read stale
+  // values right after a command. These mirrors track the last confirmed or
+  // intended values instead; commands emit intent, events and polling confirm.
+  let knownMuted = false;
+  let knownVolume = 1;
+  let knownCurrentTime = 0;
 
   const emit = (
     patch: Parameters<ProviderStateListener>[0],
@@ -248,7 +254,8 @@ export const createYouTubeProvider = (
       const current = player;
       if (destroyed || !current) return;
       try {
-        emit({ currentTime: current.getCurrentTime() });
+        knownCurrentTime = current.getCurrentTime();
+        emit({ currentTime: knownCurrentTime });
       } catch {
         // Polling must not escape the provider boundary.
       }
@@ -280,14 +287,18 @@ export const createYouTubeProvider = (
     if (!current) return;
     const duration = current.getDuration();
     const iframe = safeIframe();
+    // No command has run yet, so these reads are the player's own state.
+    knownMuted = current.isMuted();
+    knownVolume = clamp01(current.getVolume() / 100);
+    knownCurrentTime = current.getCurrentTime();
     emit(
       {
         lifecycle: 'ready',
         activation: 'ready',
-        currentTime: current.getCurrentTime(),
+        currentTime: knownCurrentTime,
         duration: Number.isFinite(duration) && duration > 0 ? duration : null,
-        muted: current.isMuted(),
-        volume: clamp01(current.getVolume() / 100),
+        muted: knownMuted,
+        volume: knownVolume,
         playbackRate: current.getPlaybackRate(),
         capabilities: readyCapabilities(
           typeof iframe?.requestFullscreen === 'function'
@@ -299,11 +310,9 @@ export const createYouTubeProvider = (
     );
   };
 
-  const emitVolumeState = (): void => {
-    const current = player;
-    if (!current) return;
-    const muted = current.isMuted();
-    const volume = clamp01(current.getVolume() / 100);
+  const emitVolumeIntent = (): void => {
+    const muted = knownMuted;
+    const volume = knownVolume;
     emit({ muted, volume }, event('volumechange', { muted, volume }));
   };
 
@@ -313,11 +322,12 @@ export const createYouTubeProvider = (
     if (data === playerStates.PLAYING) {
       settlePendingPlays({ ok: true });
       const duration = current.getDuration();
+      knownCurrentTime = current.getCurrentTime();
       emit(
         {
           playback: 'playing',
           buffering: false,
-          currentTime: current.getCurrentTime(),
+          currentTime: knownCurrentTime,
           duration: Number.isFinite(duration) && duration > 0 ? duration : null
         },
         event('play', undefined)
@@ -327,25 +337,31 @@ export const createYouTubeProvider = (
     }
     if (data === playerStates.PAUSED) {
       stopTimePolling();
+      knownCurrentTime = current.getCurrentTime();
       emit(
-        { playback: 'paused', currentTime: current.getCurrentTime() },
+        { playback: 'paused', currentTime: knownCurrentTime },
         event('pause', undefined)
       );
       return;
     }
     if (data === playerStates.ENDED) {
       stopTimePolling();
+      knownCurrentTime = current.getCurrentTime();
       emit(
         {
           playback: 'ended',
           buffering: false,
-          currentTime: current.getCurrentTime()
+          currentTime: knownCurrentTime
         },
         event('ended', undefined)
       );
       return;
     }
     if (data === playerStates.BUFFERING) {
+      // Buffering means the play request was accepted and media is loading.
+      // Blocked autoplay never buffers, so a pending play is confirmed here
+      // instead of timing out as blocked on a slow network.
+      settlePendingPlays({ ok: true });
       emit({ buffering: true });
       return;
     }
@@ -390,6 +406,9 @@ export const createYouTubeProvider = (
   const start = async (forGeneration: number): Promise<void> => {
     const api = await loadIframeApi();
     if (destroyed || forGeneration !== generation) return;
+    // Google recommends declaring the embedding origin when the JS API is
+    // active so the player can validate postMessage targets.
+    const embedOrigin = ownerDocument.defaultView?.location?.origin;
     const target = ownerDocument.createElement('div');
     mount.appendChild(target);
     playerTarget = target;
@@ -398,7 +417,12 @@ export const createYouTubeProvider = (
       videoId,
       width: '100%',
       height: '100%',
-      playerVars: { autoplay: 0, playsinline: 1, rel: 0 },
+      playerVars: {
+        autoplay: 0,
+        playsinline: 1,
+        rel: 0,
+        ...(embedOrigin ? { origin: embedOrigin } : {})
+      },
       events: {
         onReady: () => {
           if (destroyed || forGeneration !== generation) return;
@@ -447,7 +471,10 @@ export const createYouTubeProvider = (
     const target = Math.max(0, time);
     return runCommand((current) => {
       current.seekTo(target, true);
-      emit({ currentTime: current.getCurrentTime() });
+      // Emit the intended position: a read-back here would still return the
+      // pre-seek time, and paused playback never polls a correction.
+      knownCurrentTime = target;
+      emit({ currentTime: target });
     });
   };
 
@@ -498,6 +525,24 @@ export const createYouTubeProvider = (
           resolve,
           timer: setTimeout(() => {
             pendingPlays = pendingPlays.filter((entry) => entry !== pending);
+            // Double-check before reporting blocked in case a state-change
+            // event was missed: an accepted request shows up as playing or
+            // buffering. A play that starts from the iframe chrome after a
+            // genuine blocked report is a user action, so the blocked
+            // autoplay outcome stays accurate, matching the core semantics.
+            let playerState: number | undefined;
+            try {
+              playerState = current.getPlayerState();
+            } catch {
+              playerState = undefined;
+            }
+            if (
+              playerState === playerStates.PLAYING ||
+              playerState === playerStates.BUFFERING
+            ) {
+              resolve({ ok: true });
+              return;
+            }
             resolve({ ok: false, reason: 'blocked', error: blockedError() });
           }, PLAYBACK_CONFIRMATION_TIMEOUT_MS)
         };
@@ -519,17 +564,21 @@ export const createYouTubeProvider = (
       }
       const current = guardReady();
       if (!current) return Promise.resolve({ ok: false, reason: 'not-ready' });
-      return seekToTime(current.getCurrentTime() + offset);
+      // The mirror is the freshest honest base: a getter read right after an
+      // earlier seek command would still return the pre-seek position.
+      return seekToTime(knownCurrentTime + offset);
     },
     mute: () =>
       runCommand((current) => {
         current.mute();
-        emitVolumeState();
+        knownMuted = true;
+        emitVolumeIntent();
       }),
     unmute: () =>
       runCommand((current) => {
         current.unMute();
-        emitVolumeState();
+        knownMuted = false;
+        emitVolumeIntent();
       }),
     setVolume: (volume) => {
       if (!Number.isFinite(volume)) {
@@ -537,7 +586,8 @@ export const createYouTubeProvider = (
       }
       return runCommand((current) => {
         current.setVolume(Math.round(clamp01(volume) * 100));
-        emitVolumeState();
+        knownVolume = clamp01(volume);
+        emitVolumeIntent();
       });
     },
     setPlaybackRate: (rate) => {

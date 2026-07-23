@@ -61,18 +61,29 @@ const createFakeYouTube = () => {
       player: {
         playVideo: vi.fn(),
         pauseVideo: vi.fn(),
+        // The real iframe API proxies commands over postMessage: getters keep
+        // returning pre-command values for a while. The fake mirrors that by
+        // applying command effects on a later microtask.
         seekTo: vi.fn((seconds: number) => {
-          harness.currentTime = seconds;
+          queueMicrotask(() => {
+            harness.currentTime = seconds;
+          });
         }),
         mute: vi.fn(() => {
-          harness.muted = true;
+          queueMicrotask(() => {
+            harness.muted = true;
+          });
         }),
         unMute: vi.fn(() => {
-          harness.muted = false;
+          queueMicrotask(() => {
+            harness.muted = false;
+          });
         }),
         isMuted: () => harness.muted,
         setVolume: vi.fn((volume: number) => {
-          harness.volume = volume;
+          queueMicrotask(() => {
+            harness.volume = volume;
+          });
         }),
         getVolume: () => harness.volume,
         getDuration: () => harness.duration,
@@ -177,6 +188,7 @@ test('creates the player against the privacy-enhanced host without autoplay', as
   expect(harness.options.videoId).toBe('M7lc1UVf-VE');
   expect(harness.options.playerVars).toMatchObject({
     autoplay: 0,
+    origin: window.location.origin,
     playsinline: 1
   });
   expect(mount.contains(harness.iframe)).toBe(true);
@@ -377,6 +389,74 @@ test('volume commands convert the 0-1 contract onto the YouTube 0-100 scale', as
     ok: false,
     reason: 'provider-error'
   });
+});
+
+test('commands emit intended values instead of stale YouTube read-backs', async () => {
+  const { harness, patches, provider } = await readyAdapter();
+
+  const mutePending = provider.mute?.();
+  // The fake has not applied the command yet, mirroring postMessage latency.
+  expect(harness.player.isMuted()).toBe(false);
+  expect(patches).toContainEqual(expect.objectContaining({ muted: true }));
+  await mutePending;
+
+  const volumePending = provider.setVolume?.(0.5);
+  expect(harness.player.getVolume()).toBe(100);
+  expect(patches).toContainEqual(
+    expect.objectContaining({ muted: true, volume: 0.5 })
+  );
+  await volumePending;
+
+  const seekPending = provider.seekTo?.(30);
+  expect(harness.player.getCurrentTime()).toBe(0);
+  expect(patches).toContainEqual(expect.objectContaining({ currentTime: 30 }));
+  await seekPending;
+});
+
+test('a paused seek keeps the intended position without a stale correction', async () => {
+  const { harness, patches, provider } = await readyAdapter();
+
+  harness.fireStateChange(playerStates.PLAYING);
+  harness.fireStateChange(playerStates.PAUSED);
+
+  await expect(provider.seekTo?.(45)).resolves.toEqual({ ok: true });
+  // Paused playback never polls, so the emitted position must already be the
+  // intended target rather than a read-back the player has not applied yet.
+  expect(patches.at(-1)).toEqual({ currentTime: 45 });
+
+  await expect(provider.seekBy?.(-5)).resolves.toEqual({ ok: true });
+  expect(harness.player.seekTo).toHaveBeenLastCalledWith(40, true);
+});
+
+test('buffering confirms an accepted play request on a slow network', async () => {
+  vi.useFakeTimers();
+  const { harness, patches, provider } = await readyAdapter();
+
+  const slowPlay = provider.play?.();
+  harness.fireStateChange(playerStates.UNSTARTED);
+  harness.fireStateChange(playerStates.BUFFERING);
+
+  await expect(slowPlay).resolves.toEqual({ ok: true });
+
+  // Playback only starts after the blocked-detection window has passed.
+  await vi.advanceTimersByTimeAsync(PLAYBACK_CONFIRMATION_TIMEOUT_MS + 1_000);
+  harness.fireStateChange(playerStates.PLAYING);
+
+  expect(patches).toContainEqual(
+    expect.objectContaining({ playback: 'playing' })
+  );
+});
+
+test('a missed state event at the confirmation deadline is not misreported as blocked', async () => {
+  vi.useFakeTimers();
+  const { harness, provider } = await readyAdapter();
+
+  const pendingPlay = provider.play?.();
+  // The player reached PLAYING but the state-change event never arrived.
+  harness.state = playerStates.PLAYING;
+  await vi.advanceTimersByTimeAsync(PLAYBACK_CONFIRMATION_TIMEOUT_MS);
+
+  await expect(pendingPlay).resolves.toEqual({ ok: true });
 });
 
 test('playback rate confirms through the provider rate-change event', async () => {
