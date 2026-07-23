@@ -14,11 +14,81 @@ const App = () => (
     <h1>Reely</h1>
     <p>A minimal player with explicit, inspectable media source detection.</p>
     <Player.Root autoplay={autoplay} source="/tracer.mp4">
-      <Player.Viewport>
+      <Player.Viewport
+        style={{ aspectRatio: '16 / 9', maxWidth: '48rem', width: '100%' }}
+      >
+        <Player.Poster>
+          <Player.PosterImage
+            alt=""
+            decoding="async"
+            fetchPriority="high"
+            height={720}
+            loading="eager"
+            objectPosition="30% 40%"
+            sizes="(max-width: 48rem) 100vw, 48rem"
+            src="/poster.svg"
+            srcSet="/poster.svg 640w, /poster.svg 1280w"
+            width={1280}
+          />
+        </Player.Poster>
         <Player.Media />
       </Player.Viewport>
       <Player.PlayButton />
     </Player.Root>
+    <h2>Posters</h2>
+    <p>
+      The decorative <code>Player.Poster</code> sits inside the viewport before
+      media. Its crop can differ from the native video poster: native posters
+      follow the media <code>object-fit</code> and <code>object-position</code>,
+      while <code>Player.Poster</code> may choose its own focal position.
+    </p>
+    <pre>{`<Player.Viewport>
+  <Player.Poster>
+    <Player.PosterImage
+      alt=""
+      src="/poster.svg"
+      srcSet="/poster.svg 640w, /poster.svg 1280w"
+      sizes="(max-width: 48rem) 100vw, 48rem"
+      width={1280}
+      height={720}
+      loading="eager"
+      decoding="async"
+      objectPosition="30% 40%"
+    />
+  </Player.Poster>
+  <Player.Media />
+</Player.Viewport>`}</pre>
+    <p>
+      A native <code>&lt;picture&gt;</code> remains an opaque custom child; use
+      an empty alt because the poster is decorative.
+    </p>
+    <pre>{`<Player.Poster>
+  <picture>
+    <source media="(max-width: 48rem)" srcSet="/poster-narrow.webp" />
+    <img src="/poster-wide.webp" alt="" width={1280} height={720} />
+  </picture>
+</Player.Poster>`}</pre>
+    <p>
+      In Next.js 16, <code>preload</code> replaces deprecated{' '}
+      <code>priority</code>. A Next <code>Image</code> is likewise an opaque
+      poster child.
+    </p>
+    <pre>{`import Image from 'next/image'
+
+<Player.Poster>
+  <Image src="/poster.webp" alt="" fill preload sizes="100vw" />
+</Player.Poster>`}</pre>
+    <p>
+      Set <code>nativePoster</code> only when the native video poster is needed.
+      Combining it with a responsive custom poster can fetch two image
+      candidates.
+    </p>
+    <pre>{`<Player.Media nativePoster="/fallback-poster.webp" />`}</pre>
+    <p>
+      Choose image priority yourself: known heroes use preload or high fetch
+      priority; feed images use <code>loading="lazy"</code>. Reely never guesses
+      LCP priority.
+    </p>
     <h2>Install</h2>
     <pre>pnpm add @reely/react</pre>
     <h2>Sources</h2>

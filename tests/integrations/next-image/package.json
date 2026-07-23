@@ -1,0 +1,18 @@
+{
+  "name": "@reely/integration-next-image",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "next build",
+    "test:integration": "node --test harness.test.mjs && node test.mjs"
+  },
+  "dependencies": {
+    "@reely/react": "workspace:*",
+    "next": "16.2.11",
+    "react": "19.2.8",
+    "react-dom": "19.2.8"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.61.1"
+  }
+}

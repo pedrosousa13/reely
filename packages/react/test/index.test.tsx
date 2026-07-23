@@ -2,13 +2,16 @@
 
 import * as process from 'node:process';
 import {
+  act,
   cleanup,
   fireEvent,
   render,
   screen,
   waitFor
 } from '@testing-library/react';
-import { createRef, StrictMode } from 'react';
+import { createRef, startTransition, StrictMode, Suspense } from 'react';
+import type * as React from 'react';
+import { renderToString } from 'react-dom/server';
 import { afterEach, expect, test, vi } from 'vitest';
 import * as Player from '../src/index';
 
@@ -1015,6 +1018,38 @@ test('replaces the provider once when native playback options change', async () 
   unsubscribe?.();
 });
 
+test('attaches and loads one provider without detaching on source switch', async () => {
+  const load = vi
+    .spyOn(HTMLMediaElement.prototype, 'load')
+    .mockImplementation(() => undefined);
+  const handle = createRef<Player.PlayerHandle>();
+  const player = (source: string) => (
+    <Player.Root ref={handle} source={source}>
+      <Player.Media />
+    </Player.Root>
+  );
+  const { rerender } = render(player('/first.mp4'));
+  await waitFor(() => expect(load).toHaveBeenCalledOnce());
+  load.mockClear();
+  const providerStates: Array<string | null> = [];
+  const unsubscribe = handle.current?.subscribe((state) =>
+    providerStates.push(state.provider)
+  );
+  providerStates.length = 0;
+
+  rerender(player('/second.mp4'));
+  await waitFor(() => expect(load).toHaveBeenCalled());
+  await Promise.resolve();
+
+  expect(load).toHaveBeenCalledOnce();
+  expect(providerStates).toEqual(expect.arrayContaining(['native']));
+  expect(providerStates.lastIndexOf(null)).toBeLessThan(
+    providerStates.indexOf('native')
+  );
+  expect(handle.current?.getState().provider).toBe('native');
+  unsubscribe?.();
+});
+
 test('destroys the previous native adapter and ignores its stale events on source switch', async () => {
   const removeEventListener = vi.spyOn(
     HTMLMediaElement.prototype,
@@ -1043,4 +1078,390 @@ test('destroys the previous native adapter and ignores its stale events on sourc
 
   fireEvent.play(currentMedia);
   expect(screen.getByRole('button', { name: 'Pause' })).toBeDefined();
+});
+
+const posterPrimitives = Player as typeof Player & {
+  Poster: (props: {
+    children?: React.ReactNode;
+    style?: React.CSSProperties;
+    [attribute: string]: unknown;
+  }) => React.ReactNode;
+  PosterImage: (props: {
+    src?: string;
+    srcSet?: string;
+    sizes?: string;
+    width?: number | string;
+    height?: number | string;
+    loading?: 'eager' | 'lazy';
+    fetchPriority?: 'high' | 'low' | 'auto';
+    decoding?: 'async' | 'sync' | 'auto';
+    objectFit?: React.CSSProperties['objectFit'];
+    objectPosition?: React.CSSProperties['objectPosition'];
+    onLoad?: () => void;
+    onError?: () => void;
+    [attribute: string]: unknown;
+  }) => React.ReactNode;
+  normalizePoster: (input: unknown) => unknown;
+};
+
+test('renders opaque custom and native picture posters in the fixed decorative layer', () => {
+  let renderCount = 0;
+  let observedMarker: object | undefined;
+  const marker = {};
+  const CustomPoster = ({ marker: receivedMarker }: { marker: object }) => {
+    renderCount += 1;
+    observedMarker = receivedMarker;
+    return <span data-custom-poster />;
+  };
+  const { Poster } = posterPrimitives;
+
+  const { container } = render(
+    <Player.Root source="/clip.mp4">
+      <Player.Viewport data-viewport-marker style={{ color: 'red' }}>
+        <Player.Media />
+        <Poster
+          style={{
+            position: 'fixed',
+            inset: 12,
+            width: 320,
+            height: 180,
+            zIndex: 999,
+            pointerEvents: 'auto',
+            visibility: 'collapse',
+            transform: 'translateX(100px)'
+          }}
+        >
+          <CustomPoster marker={marker} />
+          <picture data-native-picture>
+            <source media="(min-width: 800px)" srcSet="/wide.jpg 2x" />
+            <img alt="" src="/small.jpg" />
+          </picture>
+        </Poster>
+      </Player.Viewport>
+    </Player.Root>
+  );
+
+  const viewport = container.querySelector('[data-reely-part="viewport"]');
+  const poster = container.querySelector('[data-reely-part="poster"]');
+  const media = screen.getByLabelText('Reely media');
+  const picture = container.querySelector('picture[data-native-picture]');
+
+  expect(renderCount).toBe(1);
+  expect(observedMarker).toBe(marker);
+  expect((viewport as HTMLElement).style.position).toBe('relative');
+  expect((viewport as HTMLElement).style.overflow).toBe('hidden');
+  expect(media.getAttribute('data-reely-part')).toBe('media');
+  expect(media.style.position).toBe('relative');
+  expect(media.style.zIndex).toBe('0');
+  expect(poster?.getAttribute('aria-hidden')).toBe('true');
+  expect(poster?.getAttribute('data-state')).toBe('visible');
+  expect((poster as HTMLElement).style).toMatchObject({
+    position: 'absolute',
+    inset: '0',
+    width: '100%',
+    height: '100%',
+    zIndex: '10',
+    pointerEvents: 'none',
+    visibility: 'visible',
+    transform: 'none'
+  });
+  expect(poster?.getAttribute('style')).not.toContain('background-image');
+  expect(picture?.outerHTML).toBe(
+    '<picture data-native-picture="true"><source media="(min-width: 800px)" srcset="/wide.jpg 2x"><img alt="" src="/small.jpg"></picture>'
+  );
+});
+
+test('normalizes poster inputs without altering consumer priority choices', () => {
+  const responsive = {
+    src: '/poster.jpg',
+    srcSet: '/poster-2x.jpg 2x',
+    sizes: '100vw',
+    width: 1600,
+    height: 900,
+    loading: 'lazy' as const,
+    fetchPriority: 'high' as const,
+    decoding: 'async' as const,
+    objectFit: 'contain' as const,
+    objectPosition: 'top' as const
+  };
+  const element = (
+    <picture>
+      <img alt="" src="/native.jpg" />
+    </picture>
+  );
+  const { normalizePoster } = posterPrimitives;
+
+  expect(normalizePoster('/poster.jpg')).toEqual({
+    type: 'image',
+    props: { src: '/poster.jpg' }
+  });
+  expect(normalizePoster(responsive)).toEqual({
+    type: 'image',
+    props: responsive
+  });
+  expect((normalizePoster(responsive) as { props: object }).props).not.toBe(
+    responsive
+  );
+  expect(normalizePoster(element)).toEqual({ type: 'custom', element });
+  expect((normalizePoster(element) as { element: object }).element).toBe(
+    element
+  );
+});
+
+test('tracks poster image request state and preserves its explicit image attributes', () => {
+  const onLoad = vi.fn();
+  const onError = vi.fn();
+  const { PosterImage } = posterPrimitives;
+  const { container, rerender } = render(<PosterImage />);
+  const image = container.querySelector('img')!;
+
+  expect(image.getAttribute('alt')).toBe('');
+  expect(image.getAttribute('data-reely-part')).toBe('poster-image');
+  expect(image.getAttribute('data-state')).toBe('idle');
+  expect(image.style).toMatchObject({
+    display: 'block',
+    width: '100%',
+    height: '100%'
+  });
+  expect(image.style.objectFit).toBe('var(--reely-poster-fit, cover)');
+  expect(image.style.objectPosition).toBe(
+    'var(--reely-poster-position, center)'
+  );
+
+  rerender(
+    <PosterImage
+      alt="consumer text"
+      decoding="async"
+      fetchPriority="high"
+      height={900}
+      loading="lazy"
+      onError={onError}
+      onLoad={onLoad}
+      sizes="100vw"
+      src="/poster.jpg"
+      srcSet="/poster-2x.jpg 2x"
+      width={1600}
+    />
+  );
+  expect(image.getAttribute('alt')).toBe('');
+  expect(image.getAttribute('data-state')).toBe('loading');
+  expect(image.getAttribute('srcset')).toBe('/poster-2x.jpg 2x');
+  expect(image.getAttribute('sizes')).toBe('100vw');
+  expect(image.getAttribute('fetchpriority')).toBe('high');
+  fireEvent.load(image);
+  expect(image.getAttribute('data-state')).toBe('loaded');
+  expect(onLoad).toHaveBeenCalledOnce();
+
+  rerender(
+    <PosterImage
+      objectFit="contain"
+      objectPosition="top"
+      onError={onError}
+      src="/replacement.jpg"
+      srcSet="/replacement-2x.jpg 2x"
+    />
+  );
+  expect(image.getAttribute('data-state')).toBe('loading');
+  expect(image.style.objectFit).toBe('contain');
+  expect(image.style.objectPosition).toBe('top');
+  fireEvent.error(image);
+  expect(image.getAttribute('data-state')).toBe('error');
+  expect(onError).toHaveBeenCalledOnce();
+});
+
+test('hides the poster only for confirmed playback or the current media frame', async () => {
+  const { Poster } = posterPrimitives;
+  const handle = createRef<Player.PlayerHandle>();
+  const player = (source: string) => (
+    <Player.Root ref={handle} source={source}>
+      <Player.Viewport>
+        <Player.Media />
+        <Poster>
+          <span>Poster</span>
+        </Poster>
+      </Player.Viewport>
+    </Player.Root>
+  );
+  const { rerender } = render(player('/first.mp4'));
+  const firstMedia = screen.getByLabelText<HTMLVideoElement>('Reely media');
+  const poster = screen.getByText('Poster').parentElement!;
+
+  expect(poster.getAttribute('data-state')).toBe('visible');
+  vi.spyOn(HTMLMediaElement.prototype, 'play').mockResolvedValue(undefined);
+  await handle.current?.play();
+  expect(poster.getAttribute('data-state')).toBe('visible');
+  fireEvent.play(firstMedia);
+  expect(poster.getAttribute('data-state')).toBe('hidden');
+
+  rerender(player('/second.mp4'));
+  const secondMedia = screen.getByLabelText<HTMLVideoElement>('Reely media');
+  expect(poster.getAttribute('data-state')).toBe('visible');
+  fireEvent.loadedData(firstMedia);
+  expect(poster.getAttribute('data-state')).toBe('visible');
+  fireEvent.loadedData(secondMedia);
+  expect(poster.getAttribute('data-state')).toBe('hidden');
+});
+
+test('shows the poster synchronously for every A to B to A source transition', () => {
+  const { Poster } = posterPrimitives;
+  const player = (source: string) => (
+    <Player.Root source={source}>
+      <Player.Viewport>
+        <Player.Media />
+        <Poster>
+          <span>Transition poster</span>
+        </Poster>
+      </Player.Viewport>
+    </Player.Root>
+  );
+  const { rerender } = render(player('/first.mp4'));
+  const poster = screen.getByText('Transition poster').parentElement!;
+
+  fireEvent.loadedData(screen.getByLabelText('Reely media'));
+  expect(poster.getAttribute('data-state')).toBe('hidden');
+
+  rerender(player('/second.mp4'));
+  expect(poster.getAttribute('data-state')).toBe('visible');
+
+  rerender(player('/first.mp4'));
+  expect(poster.getAttribute('data-state')).toBe('visible');
+  fireEvent.loadedData(screen.getByLabelText('Reely media'));
+  expect(poster.getAttribute('data-state')).toBe('hidden');
+});
+
+test('keeps the committed poster lifecycle through an abandoned source render', async () => {
+  const suspendedForever = new Promise<never>(() => undefined);
+  let attemptedSecondSource = false;
+  const SuspendForSecondSource = ({ source }: { source: string }) => {
+    if (source === '/second.mp4') {
+      attemptedSecondSource = true;
+      throw suspendedForever;
+    }
+    return null;
+  };
+  const { Poster } = posterPrimitives;
+  const player = (source: string) => (
+    <Player.Root source={source}>
+      <Suspense fallback={<span>Suspended source</span>}>
+        <Player.Viewport>
+          <Player.Media />
+          <Poster>
+            <span>Concurrent poster</span>
+          </Poster>
+          <SuspendForSecondSource source={source} />
+        </Player.Viewport>
+      </Suspense>
+    </Player.Root>
+  );
+  const { rerender } = render(player('/first.mp4'));
+  const committedMedia = screen.getByLabelText<HTMLVideoElement>('Reely media');
+  const poster = screen.getByText('Concurrent poster').parentElement!;
+
+  await act(async () => {
+    startTransition(() => rerender(player('/second.mp4')));
+  });
+
+  expect(attemptedSecondSource).toBe(true);
+  expect(screen.queryByText('Suspended source')).toBeNull();
+  expect(screen.getByLabelText('Reely media')).toBe(committedMedia);
+  fireEvent.loadedData(committedMedia);
+  expect(poster.getAttribute('data-state')).toBe('hidden');
+
+  await act(async () => {
+    startTransition(() => rerender(player('/first.mp4')));
+  });
+  expect(poster.getAttribute('data-state')).toBe('hidden');
+});
+
+test('hides the poster when attached media already has current data', () => {
+  Object.defineProperty(HTMLMediaElement, 'HAVE_CURRENT_DATA', {
+    configurable: true,
+    value: 2
+  });
+  vi.spyOn(HTMLMediaElement.prototype, 'readyState', 'get').mockReturnValue(2);
+  const { Poster } = posterPrimitives;
+
+  render(
+    <Player.Root source="/cached.mp4">
+      <Player.Viewport>
+        <Player.Media />
+        <Poster>
+          <span>Cached poster</span>
+        </Poster>
+      </Player.Viewport>
+    </Player.Root>
+  );
+
+  expect(
+    screen.getByText('Cached poster').parentElement?.getAttribute('data-state')
+  ).toBe('hidden');
+});
+
+test('keeps poster lifecycle listeners correct through StrictMode replay', () => {
+  const { Poster } = posterPrimitives;
+  render(
+    <StrictMode>
+      <Player.Root source="/strict.mp4">
+        <Player.Viewport>
+          <Player.Media />
+          <Poster>
+            <span>Strict poster</span>
+          </Poster>
+        </Player.Viewport>
+      </Player.Root>
+    </StrictMode>
+  );
+
+  fireEvent.loadedData(screen.getByLabelText('Reely media'));
+  expect(
+    screen.getByText('Strict poster').parentElement?.getAttribute('data-state')
+  ).toBe('hidden');
+});
+
+test('forwards nativePoster only to native videos and server-renders poster markup', () => {
+  const { Poster, PosterImage } = posterPrimitives;
+  const player = (
+    source: Player.RootProps['source'],
+    nativePoster?: string
+  ) => (
+    <Player.Root source={source}>
+      <Player.Media nativePoster={nativePoster} />
+    </Player.Root>
+  );
+  const { rerender } = render(player('/clip.mp4', '/fallback.jpg'));
+
+  expect(screen.getByLabelText('Reely media').getAttribute('poster')).toBe(
+    '/fallback.jpg'
+  );
+  rerender(player('/clip.mp4', '/updated.jpg'));
+  expect(screen.getByLabelText('Reely media').getAttribute('poster')).toBe(
+    '/updated.jpg'
+  );
+  rerender(player({ type: 'hls', src: '/master.m3u8' }, '/fallback.jpg'));
+  expect(screen.queryByLabelText('Reely media')).toBeNull();
+  rerender(
+    player({ type: 'youtube', videoId: 'dQw4w9WgXcQ' }, '/fallback.jpg')
+  );
+  expect(screen.queryByLabelText('Reely media')).toBeNull();
+
+  const markup = renderToString(
+    <Player.Root source="/server.mp4">
+      <Player.Viewport>
+        <Player.Media />
+        <Poster>
+          <PosterImage
+            sizes="100vw"
+            src="/server.jpg"
+            srcSet="/server-2x.jpg 2x"
+          />
+        </Poster>
+      </Player.Viewport>
+    </Player.Root>
+  );
+  expect(markup).toContain('data-reely-part="viewport"');
+  expect(markup).toContain('data-reely-part="poster"');
+  expect(markup).toContain('data-reely-part="poster-image"');
+  expect(markup).toContain('srcSet="/server-2x.jpg 2x"');
+  expect(markup).toContain('sizes="100vw"');
+  expect(markup).toContain('alt=""');
 });
