@@ -10,6 +10,7 @@ export default defineConfig({
         '@reely/core',
         '@reely/provider-hls',
         '@reely/provider-native',
+        '@reely/provider-vimeo',
         '@reely/provider-youtube'
       ]
     },

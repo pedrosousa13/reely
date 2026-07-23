@@ -810,6 +810,25 @@ export const Media = ({ nativePoster }: MediaProps) => {
     );
   }
 
+  if (source.source.type === 'vimeo') {
+    // A mount for the Vimeo iframe embed. When chromeless controls are
+    // plan-gated, Vimeo's own controls stay the single layer; Reely renders
+    // nothing over the embed.
+    return (
+      <div
+        data-reely-part="media"
+        key={sourceKey(source)}
+        ref={registerMedia}
+        style={{
+          position: 'relative',
+          zIndex: 0,
+          width: '100%',
+          height: '100%'
+        }}
+      />
+    );
+  }
+
   if (source.source.type !== 'video' && source.source.type !== 'hls') {
     return null;
   }

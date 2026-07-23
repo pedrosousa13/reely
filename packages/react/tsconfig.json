@@ -13,6 +13,7 @@
     { "path": "../core" },
     { "path": "../provider-hls" },
     { "path": "../provider-native" },
+    { "path": "../provider-vimeo" },
     { "path": "../provider-youtube" }
   ],
   "include": ["src"]

@@ -35,5 +35,15 @@ export const loadProvider = async ({
     const { createYouTubeProvider } = await import('@reely/provider-youtube');
     return createYouTubeProvider(media, source.videoId);
   }
-  throw new Error(`No provider adapter is installed for ${source.type}.`);
+  if (source.type === 'vimeo') {
+    if (!media) {
+      throw new Error('The Vimeo provider requires a media mount.');
+    }
+    const { createVimeoProvider } = await import('@reely/provider-vimeo');
+    return createVimeoProvider(media, source);
+  }
+  // Every known source type is handled above, so `source` narrows to `never`
+  // here; read the type defensively for a runtime-only unknown source.
+  const unknownType = (source as { type?: string }).type ?? 'unknown';
+  throw new Error(`No provider adapter is installed for ${unknownType}.`);
 };
