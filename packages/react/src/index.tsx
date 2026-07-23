@@ -89,6 +89,7 @@ export type PlayerHandle = Pick<
   | 'togglePlayback'
   | 'seekTo'
   | 'seekBy'
+  | 'selectQuality'
   | 'mute'
   | 'unmute'
   | 'toggleMuted'
@@ -242,6 +243,7 @@ export const usePlayerActions = (): PlayerActions => {
       togglePlayback: controller.togglePlayback,
       seekTo: controller.seekTo,
       seekBy: controller.seekBy,
+      selectQuality: controller.selectQuality,
       mute: controller.mute,
       unmute: controller.unmute,
       toggleMuted: controller.toggleMuted,
@@ -721,7 +723,7 @@ export const Media = ({ nativePoster }: MediaProps) => {
   if (
     !mediaEligible ||
     source.status === 'failure' ||
-    source.source.type !== 'video'
+    (source.source.type !== 'video' && source.source.type !== 'hls')
   ) {
     return null;
   }
@@ -737,9 +739,17 @@ export const Media = ({ nativePoster }: MediaProps) => {
       ref={registerMedia}
       style={{ position: 'relative', zIndex: 0 }}
     >
-      {source.source.sources.map(({ mimeType, src }, index) => (
-        <source key={`${src}:${mimeType}:${index}`} src={src} type={mimeType} />
-      ))}
+      {source.source.type === 'video'
+        ? source.source.sources.map(({ mimeType, src }, index) => (
+            <source
+              key={`${src}:${mimeType}:${index}`}
+              src={src}
+              type={mimeType}
+            />
+          ))
+        : // The HLS provider owns the media source: the native engine assigns
+          // the manifest URL and hls.js attaches Media Source Extensions.
+          null}
     </video>
   );
 };

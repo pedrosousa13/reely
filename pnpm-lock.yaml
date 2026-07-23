@@ -103,6 +103,9 @@ importers:
       '@reely/core':
         specifier: workspace:*
         version: link:../core
+      '@reely/provider-hls':
+        specifier: workspace:*
+        version: link:../provider-hls
       '@reely/provider-native':
         specifier: workspace:*
         version: link:../provider-native

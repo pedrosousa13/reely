@@ -12,6 +12,13 @@ export const loadProvider = async ({
   nativeOptions,
   source
 }: ProviderLoaderRequest): Promise<ProviderAdapter> => {
+  if (source.type === 'hls') {
+    if (!media) {
+      throw new Error('The HLS provider requires a media mount.');
+    }
+    const { createHlsProvider } = await import('@reely/provider-hls');
+    return createHlsProvider(media, source, nativeOptions);
+  }
   if (source.type !== 'video') {
     throw new Error(`No provider adapter is installed for ${source.type}.`);
   }

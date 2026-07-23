@@ -8,6 +8,7 @@ export default defineConfig({
         'react',
         'react/jsx-runtime',
         '@reely/core',
+        '@reely/provider-hls',
         '@reely/provider-native'
       ]
     },

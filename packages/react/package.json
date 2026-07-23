@@ -14,6 +14,7 @@
   ],
   "dependencies": {
     "@reely/core": "workspace:*",
+    "@reely/provider-hls": "workspace:*",
     "@reely/provider-native": "workspace:*"
   },
   "peerDependencies": {
