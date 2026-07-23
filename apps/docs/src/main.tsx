@@ -688,6 +688,52 @@ await seekTo(30) // { ok: true } or { ok: false, reason, error? }`}</pre>
       provider state, so use player actions to request play or pause and read
       the result with <code>usePlayerState</code>.
     </p>
+    <h2>Transport controls</h2>
+    <p>
+      The transport primitives are headless: each renders a real native element
+      (a <code>&lt;button&gt;</code> or a native range slider) with stable{' '}
+      <code>data-reely-part</code>, <code>data-state</code>, and{' '}
+      <code>data-provider</code> attributes plus the matching ARIA state, and
+      every one accepts <code>className</code>, <code>style</code>,{' '}
+      <code>ref</code>, and replacement children. Capability-gated controls
+      render nothing while their capability is <code>unavailable</code> or still{' '}
+      <code>unknown</code> — they never flash in or render disabled-but-visible.
+      Compose them yourself:
+    </p>
+    <pre>{`<Player.PlayButton />           // Space/K, toggles play & pause
+<Player.MuteButton />           // shown once setVolume resolves
+<Player.VolumeSlider />         // native range, 0..1, aria-valuetext "60%"
+<Player.SeekSlider />           // native range + buffered ranges from state
+<Player.Time type="current" />  // "current" | "duration" | "remaining"
+<Player.FullscreenButton />     // absent until fullscreen capability resolves
+<Player.PipButton />            // absent until picture-in-picture resolves`}</pre>
+    <p>
+      <code>Player.Controls</code> is the container that scopes keyboard
+      shortcuts to itself. While focus is inside it, Space/K toggle play,
+      Left/Right seek ±5s, J/L seek ±10s, Up/Down change volume, M mutes, and F
+      toggles fullscreen. Shortcuts ignore inputs, textareas, contenteditable
+      regions, and open menus; pass <code>global</code> to opt into
+      document-level shortcuts instead. Focus is kept inside the region when a
+      capability-gated control disappears, so keyboard users never drop to{' '}
+      <code>&lt;body&gt;</code>.
+    </p>
+    <pre>{`<Player.Controls aria-label="Video player controls">
+  <Player.PlayButton />
+  <Player.MuteButton />
+  <Player.VolumeSlider />
+  <Player.SeekSlider />
+  <Player.Time type="current" /> / <Player.Time type="duration" />
+  <Player.FullscreenButton />
+  <Player.PipButton />
+</Player.Controls>`}</pre>
+    <p>
+      <code>Player.LoadingIndicator</code> is a polite live region that appears
+      only while the provider is loading or the media is buffering. Replace its
+      children with your own spinner:
+    </p>
+    <pre>{`<Player.LoadingIndicator>
+  <MySpinner />
+</Player.LoadingIndicator>`}</pre>
     <h2>Fullscreen and Picture-in-Picture</h2>
     <p>
       <code>requestFullscreen</code>, <code>exitFullscreen</code>,{' '}
