@@ -7,7 +7,7 @@ import {
   render,
   screen
 } from '@testing-library/react';
-import { createRef, useLayoutEffect } from 'react';
+import { createRef, useLayoutEffect, type Ref } from 'react';
 import { renderToString } from 'react-dom/server';
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 import {
@@ -16,6 +16,7 @@ import {
   type ProviderAdapter,
   type ProviderStateListener
 } from '@reely/core';
+import type { NativePlaybackOptions } from '@reely/provider-native';
 import * as Player from '../src/index';
 import { loadProvider } from '../src/provider-loaders';
 import { useActivation } from '../src/use-activation';
@@ -75,9 +76,12 @@ type ActivationProbeProps = {
   readonly autoplay?: Player.RootProps['autoplay'];
   readonly controller: PlayerController;
   readonly loading?: Player.PlayerLoadingStrategy;
+  readonly loadMargin?: string;
   readonly mediaKey?: string;
+  readonly nativeOptions?: NativePlaybackOptions;
   readonly onActivate?: (activate: () => void) => void;
   readonly onLayout?: () => void;
+  readonly preload?: Player.PlayerPreload;
   readonly showMedia?: boolean;
   readonly showViewport?: boolean;
   readonly source?: Player.RootProps['source'];
@@ -88,9 +92,12 @@ const ActivationProbe = ({
   autoplay = false,
   controller,
   loading = 'eager',
+  loadMargin = '200px 0px',
   mediaKey = 'media',
+  nativeOptions = {},
   onActivate,
   onLayout,
+  preload = 'metadata',
   showMedia = true,
   showViewport = true,
   source = '/tracer.mp4',
@@ -104,11 +111,11 @@ const ActivationProbe = ({
   } = useActivation({
     autoplay,
     controller,
-    loadMargin: '200px 0px',
+    loadMargin,
     loading,
-    nativeOptions: {},
+    nativeOptions,
     prepareMedia: () => undefined,
-    preload: 'metadata',
+    preload,
     source: detectSource(source)
   });
   useLayoutEffect(() => {
@@ -126,6 +133,7 @@ const ActivationProbe = ({
       ) : null}
       {mediaEligible && showMedia ? (
         <video
+          data-source={source}
           data-testid="activation-media"
           key={mediaKey}
           ref={registerMedia}
@@ -221,6 +229,91 @@ test('viewport uses a custom margin', () => {
   );
 });
 
+test('dormant viewport activation uses native options changed before intersection', async () => {
+  const fake = createFakeProvider();
+  mockedLoadProvider.mockResolvedValue(fake.adapter);
+  const controller = new PlayerController();
+  const { rerender } = render(
+    <ActivationProbe
+      controller={controller}
+      loading="viewport"
+      nativeOptions={{ startTime: 1 }}
+    />
+  );
+  const observer = ControlledIntersectionObserver.instances[0]!;
+
+  rerender(
+    <ActivationProbe
+      controller={controller}
+      loading="viewport"
+      nativeOptions={{ startTime: 2 }}
+    />
+  );
+  act(() => observer.intersect());
+
+  await vi.waitFor(() => expect(mockedLoadProvider).toHaveBeenCalledOnce());
+  expect(mockedLoadProvider.mock.calls[0]?.[0].nativeOptions).toEqual({
+    startTime: 2
+  });
+});
+
+test('invalid viewport margin construction reports a recoverable configuration error', async () => {
+  class ThrowingConstructorObserver extends ControlledIntersectionObserver {
+    constructor(
+      callback: IntersectionObserverCallback,
+      options?: IntersectionObserverInit
+    ) {
+      super(callback, options);
+      throw new DOMException('Invalid root margin.', 'SyntaxError');
+    }
+  }
+  vi.stubGlobal('IntersectionObserver', ThrowingConstructorObserver);
+  const handle = createRef<Player.PlayerHandle>();
+
+  render(fixture({ ref: handle }));
+
+  await vi.waitFor(() =>
+    expect(handle.current?.getState()).toMatchObject({
+      activation: 'error',
+      error: {
+        category: 'configuration',
+        fatal: false,
+        recoverable: true
+      },
+      lifecycle: 'error'
+    })
+  );
+  expect(mockedLoadProvider).not.toHaveBeenCalled();
+});
+
+test('viewport observation failures report a recoverable configuration error', async () => {
+  class ThrowingObserveObserver extends ControlledIntersectionObserver {
+    override observe = vi.fn(() => {
+      throw new Error('Target cannot be observed.');
+    });
+  }
+  vi.stubGlobal('IntersectionObserver', ThrowingObserveObserver);
+  const handle = createRef<Player.PlayerHandle>();
+
+  render(fixture({ ref: handle }));
+
+  await vi.waitFor(() =>
+    expect(handle.current?.getState()).toMatchObject({
+      activation: 'error',
+      error: {
+        category: 'configuration',
+        fatal: false,
+        recoverable: true
+      },
+      lifecycle: 'error'
+    })
+  );
+  expect(
+    ControlledIntersectionObserver.instances[0]?.disconnect
+  ).toHaveBeenCalled();
+  expect(mockedLoadProvider).not.toHaveBeenCalled();
+});
+
 test('viewport without Viewport reports an error and never imports', async () => {
   const handle = createRef<Player.PlayerHandle>();
   render(
@@ -258,6 +351,113 @@ test('source changes invalidate a pending loader', async () => {
   await vi.waitFor(() => expect(stale.counts().destroyCount).toBe(1));
   expect(current.counts()).toMatchObject({ attachCount: 1, loadCount: 1 });
   expect(stale.counts()).toMatchObject({ attachCount: 0, loadCount: 0 });
+});
+
+test('interaction eligibility is dormant during the first commit of a new source', async () => {
+  const pending = deferred<ProviderAdapter>();
+  const controller = new PlayerController();
+  let activateFromInteraction!: () => void;
+  let renderedSecondSourceAsEligible: boolean | undefined;
+  mockedLoadProvider.mockReturnValue(pending.promise);
+  const onActivate = (activate: () => void) => {
+    activateFromInteraction = activate;
+  };
+  const { rerender } = render(
+    <ActivationProbe
+      controller={controller}
+      loading="interaction"
+      onActivate={onActivate}
+      source="/first.mp4"
+    />
+  );
+  act(() => activateFromInteraction());
+  await vi.waitFor(() => expect(mockedLoadProvider).toHaveBeenCalledOnce());
+
+  rerender(
+    <ActivationProbe
+      controller={controller}
+      loading="interaction"
+      onActivate={onActivate}
+      onLayout={() => {
+        renderedSecondSourceAsEligible =
+          screen.queryByTestId('activation-media')?.dataset.source ===
+          '/second.mp4';
+      }}
+      source="/second.mp4"
+    />
+  );
+
+  expect(renderedSecondSourceAsEligible).toBe(false);
+});
+
+test('a stale viewport callback cannot activate after switching to interaction', async () => {
+  const controller = new PlayerController();
+  const { rerender } = render(
+    <ActivationProbe
+      controller={controller}
+      loading="viewport"
+      showMedia={false}
+    />
+  );
+  const staleObserver = ControlledIntersectionObserver.instances[0]!;
+
+  rerender(
+    <ActivationProbe
+      controller={controller}
+      loading="interaction"
+      showMedia={false}
+    />
+  );
+  act(() => staleObserver.intersect());
+
+  await Promise.resolve();
+  expect(controller.getState()).toMatchObject({
+    activation: 'dormant',
+    provider: null
+  });
+  expect(mockedLoadProvider).not.toHaveBeenCalled();
+});
+
+test('a strategy change invalidates a pending loader', async () => {
+  const pending = deferred<ProviderAdapter>();
+  const stale = createFakeProvider();
+  const controller = new PlayerController();
+  mockedLoadProvider.mockReturnValue(pending.promise);
+  const { rerender } = render(
+    <ActivationProbe controller={controller} loading="eager" />
+  );
+  await vi.waitFor(() => expect(mockedLoadProvider).toHaveBeenCalledOnce());
+
+  rerender(<ActivationProbe controller={controller} loading="interaction" />);
+  pending.resolve(stale.adapter);
+
+  await vi.waitFor(() => expect(stale.counts().destroyCount).toBe(1));
+  expect(stale.counts()).toMatchObject({ attachCount: 0, loadCount: 0 });
+  expect(controller.getState()).toMatchObject({
+    activation: 'dormant',
+    provider: null
+  });
+});
+
+test('a strategy change detaches an installed adapter and returns to dormant', async () => {
+  const installed = createFakeProvider();
+  const controller = new PlayerController();
+  mockedLoadProvider.mockResolvedValue(installed.adapter);
+  const { rerender } = render(
+    <ActivationProbe controller={controller} loading="eager" />
+  );
+  await vi.waitFor(() =>
+    expect(installed.counts()).toMatchObject({ attachCount: 1, loadCount: 1 })
+  );
+
+  rerender(<ActivationProbe controller={controller} loading="interaction" />);
+
+  await vi.waitFor(() => expect(installed.counts().destroyCount).toBe(1));
+  expect(controller.getState()).toMatchObject({
+    activation: 'dormant',
+    provider: null
+  });
+  expect(screen.queryByTestId('activation-media')).toBeNull();
 });
 
 test('interaction plays once when installation synchronously becomes ready', async () => {
@@ -381,6 +581,106 @@ test('replacing media detaches and reloads for the replacement node', async () =
   expect(previous.counts().destroyCount).toBe(1);
 });
 
+test.each([
+  [
+    'startTime',
+    { startTime: 1 } satisfies NativePlaybackOptions,
+    { startTime: 2 } satisfies NativePlaybackOptions
+  ],
+  [
+    'endTime',
+    { endTime: 8 } satisfies NativePlaybackOptions,
+    { endTime: 9 } satisfies NativePlaybackOptions
+  ],
+  [
+    'loop',
+    { loop: false } satisfies NativePlaybackOptions,
+    { loop: true } satisfies NativePlaybackOptions
+  ]
+])(
+  'replaces the installed adapter when same-media %s changes',
+  async (_option, initialOptions, nextOptions) => {
+    const previous = createFakeProvider();
+    const replacement = createFakeProvider();
+    const controller = new PlayerController();
+    mockedLoadProvider
+      .mockResolvedValueOnce(previous.adapter)
+      .mockResolvedValueOnce(replacement.adapter);
+    const { rerender } = render(
+      <ActivationProbe controller={controller} nativeOptions={initialOptions} />
+    );
+    await vi.waitFor(() =>
+      expect(previous.counts()).toMatchObject({
+        attachCount: 1,
+        loadCount: 1
+      })
+    );
+
+    rerender(
+      <ActivationProbe controller={controller} nativeOptions={nextOptions} />
+    );
+
+    await vi.waitFor(() => expect(mockedLoadProvider).toHaveBeenCalledTimes(2));
+    expect(mockedLoadProvider.mock.calls[1]?.[0].nativeOptions).toEqual(
+      nextOptions
+    );
+    await vi.waitFor(() =>
+      expect(replacement.counts()).toMatchObject({
+        attachCount: 1,
+        loadCount: 1
+      })
+    );
+    expect(previous.counts().destroyCount).toBe(1);
+  }
+);
+
+test('native option changes invalidate an older pending load', async () => {
+  const firstLoad = deferred<ProviderAdapter>();
+  const stale = createFakeProvider();
+  const current = createFakeProvider();
+  const controller = new PlayerController();
+  mockedLoadProvider
+    .mockReturnValueOnce(firstLoad.promise)
+    .mockResolvedValueOnce(current.adapter);
+  const { rerender } = render(
+    <ActivationProbe controller={controller} nativeOptions={{ startTime: 1 }} />
+  );
+  await vi.waitFor(() => expect(mockedLoadProvider).toHaveBeenCalledOnce());
+
+  rerender(
+    <ActivationProbe controller={controller} nativeOptions={{ startTime: 2 }} />
+  );
+  await vi.waitFor(() => expect(mockedLoadProvider).toHaveBeenCalledTimes(2));
+  firstLoad.resolve(stale.adapter);
+
+  await vi.waitFor(() => expect(stale.counts().destroyCount).toBe(1));
+  expect(stale.counts()).toMatchObject({ attachCount: 0, loadCount: 0 });
+  expect(current.counts()).toMatchObject({ attachCount: 1, loadCount: 1 });
+});
+
+test('contains asynchronous stale adapter destroy rejection', async () => {
+  const firstLoad = deferred<ProviderAdapter>();
+  const stale = createFakeProvider();
+  const current = createFakeProvider();
+  const destroyRejection = Promise.reject(new Error('stale destroy failed'));
+  const catchRejection = vi.spyOn(destroyRejection, 'catch');
+  void destroyRejection.catch(() => undefined);
+  stale.adapter.destroy = () => destroyRejection;
+  mockedLoadProvider
+    .mockReturnValueOnce(firstLoad.promise)
+    .mockResolvedValueOnce(current.adapter);
+  const { rerender } = render(
+    fixture({ loading: 'eager', source: '/first.mp4' })
+  );
+  await vi.waitFor(() => expect(mockedLoadProvider).toHaveBeenCalledOnce());
+
+  rerender(fixture({ loading: 'eager', source: '/second.mp4' }));
+  await vi.waitFor(() => expect(mockedLoadProvider).toHaveBeenCalledTimes(2));
+  firstLoad.resolve(stale.adapter);
+
+  await vi.waitFor(() => expect(catchRejection).toHaveBeenCalledTimes(2));
+});
+
 test('viewport replacement observes the committed replacement target', async () => {
   const controller = new PlayerController();
   const { rerender } = render(
@@ -415,6 +715,62 @@ test('viewport replacement observes the committed replacement target', async () 
   expect(secondObserver.observe).toHaveBeenCalledExactlyOnceWith(
     secondViewport
   );
+});
+
+test('Viewport runs a consumer callback-ref cleanup on unmount', () => {
+  const consumerCleanup = vi.fn();
+  const consumerRef = vi.fn((node: HTMLDivElement | null) =>
+    node ? consumerCleanup : undefined
+  );
+  const { unmount } = render(
+    <Player.Root loading="eager" source="/tracer.mp4">
+      <Player.Viewport ref={consumerRef} />
+    </Player.Root>
+  );
+  expect(consumerRef).toHaveBeenCalledWith(
+    document.querySelector('[data-reely-part="viewport"]')
+  );
+
+  unmount();
+
+  expect(consumerCleanup).toHaveBeenCalledOnce();
+});
+
+test('Viewport composes callback-ref replacement cleanup and object-ref clearing', () => {
+  const firstCleanup = vi.fn();
+  const secondCleanup = vi.fn();
+  const firstRef = vi.fn((node: HTMLDivElement | null) =>
+    node ? firstCleanup : undefined
+  );
+  const secondRef = vi.fn((node: HTMLDivElement | null) =>
+    node ? secondCleanup : undefined
+  );
+  const objectRef = createRef<HTMLDivElement>();
+  const player = (
+    viewportRef:
+      | Ref<HTMLDivElement>
+      | ((node: HTMLDivElement | null) => (() => void) | undefined)
+  ) => (
+    <Player.Root loading="eager" source="/tracer.mp4">
+      <Player.Viewport ref={viewportRef} />
+    </Player.Root>
+  );
+  const { rerender, unmount } = render(player(firstRef));
+
+  rerender(player(secondRef));
+  expect(firstCleanup).toHaveBeenCalledOnce();
+  expect(secondRef).toHaveBeenCalledWith(
+    document.querySelector('[data-reely-part="viewport"]')
+  );
+
+  rerender(player(objectRef));
+  expect(secondCleanup).toHaveBeenCalledOnce();
+  expect(objectRef.current).toBe(
+    document.querySelector('[data-reely-part="viewport"]')
+  );
+
+  unmount();
+  expect(objectRef.current).toBeNull();
 });
 
 test('viewport restarts its dormant observer after a strategy round-trip', async () => {
@@ -557,6 +913,27 @@ test('interaction plays exactly once after asynchronous readiness', async () => 
   );
 });
 
+test('interaction with preload none plays immediately after installation exactly once', async () => {
+  const installationOrder: string[] = [];
+  const fake = createFakeProvider({
+    onLoad: () => installationOrder.push('load'),
+    onPlay: () => installationOrder.push('play')
+  });
+  mockedLoadProvider.mockResolvedValue(fake.adapter);
+  render(interactionFixture({ preload: 'none' }));
+
+  fireEvent.click(screen.getByRole('button', { name: 'Play video' }));
+
+  await vi.waitFor(() => expect(fake.counts().playCount).toBe(1));
+  act(() => {
+    fake.emit({ activation: 'ready', lifecycle: 'ready' });
+    fake.emit({ activation: 'ready', lifecycle: 'ready' });
+  });
+  await Promise.resolve();
+  expect(fake.counts().playCount).toBe(1);
+  expect(installationOrder).toEqual(['load', 'play']);
+});
+
 test('real loader returns a Promise and rejects a missing media mount', async () => {
   const actual = await vi.importActual<
     typeof import('../src/provider-loaders')
@@ -694,12 +1071,14 @@ test('one interaction click loads and queues user-origin playback', async () => 
   fireEvent.click(activation);
 
   await vi.waitFor(() => expect(mockedLoadProvider).toHaveBeenCalledOnce());
+  const media = mockedLoadProvider.mock.calls[0]?.[0].media;
+  expect(media?.muted).toBe(true);
   expect(screen.getByRole('status').dataset.state).toBe('loading-provider');
   act(() =>
     fake.emit({
       activation: 'ready',
       lifecycle: 'ready',
-      muted: true
+      muted: media?.muted
     })
   );
   await vi.waitFor(() => expect(fake.counts().playCount).toBe(1));
@@ -715,6 +1094,7 @@ test('audible blocked playback is not silently muted', async () => {
 
   fireEvent.click(screen.getByRole('button', { name: 'Play video' }));
   await vi.waitFor(() => expect(mockedLoadProvider).toHaveBeenCalledOnce());
+  expect(mockedLoadProvider.mock.calls[0]?.[0].media?.muted).toBe(false);
   act(() =>
     fake.emit({
       activation: 'ready',
@@ -725,7 +1105,67 @@ test('audible blocked playback is not silently muted', async () => {
 
   await vi.waitFor(() => expect(fake.counts().playCount).toBe(1));
   expect(screen.getByRole('button', { name: 'Play' })).toBeDefined();
-  expect(fake.counts().playCount).toBe(1);
+  expect(fake.counts()).toMatchObject({ muteCount: 0, playCount: 1 });
+});
+
+test.each([
+  { initialMuted: true, nextMuted: false },
+  { initialMuted: false, nextMuted: true }
+])(
+  'reconciles controlled muted $initialMuted→$nextMuted before pending provider installation',
+  async ({ initialMuted, nextMuted }) => {
+    const pending = deferred<ProviderAdapter>();
+    mockedLoadProvider.mockReturnValue(pending.promise);
+    const { rerender } = render(interactionFixture({ muted: initialMuted }));
+    fireEvent.click(screen.getByRole('button', { name: 'Play video' }));
+    await vi.waitFor(() => expect(mockedLoadProvider).toHaveBeenCalledOnce());
+    const media = mockedLoadProvider.mock.calls[0]?.[0].media;
+    expect(media?.muted).toBe(initialMuted);
+    let mutedAtAttach: boolean | undefined;
+    const fake = createFakeProvider({
+      onAttach: () => {
+        mutedAtAttach = media?.muted;
+      }
+    });
+
+    rerender(interactionFixture({ muted: nextMuted }));
+    pending.resolve(fake.adapter);
+
+    await vi.waitFor(() => expect(fake.counts().attachCount).toBe(1));
+    expect(mutedAtAttach).toBe(nextMuted);
+    expect(fake.counts()).toMatchObject({ muteCount: 0, unmuteCount: 0 });
+  }
+);
+
+test('reconciles controlled volume and playback rate before pending provider installation', async () => {
+  const pending = deferred<ProviderAdapter>();
+  mockedLoadProvider.mockReturnValue(pending.promise);
+  const { rerender } = render(
+    interactionFixture({ playbackRate: 1.25, volume: 0.25 })
+  );
+  fireEvent.click(screen.getByRole('button', { name: 'Play video' }));
+  await vi.waitFor(() => expect(mockedLoadProvider).toHaveBeenCalledOnce());
+  const media = mockedLoadProvider.mock.calls[0]?.[0].media;
+  expect(media).toMatchObject({ playbackRate: 1.25, volume: 0.25 });
+  let preferencesAtAttach:
+    { readonly playbackRate: number; readonly volume: number } | undefined;
+  const fake = createFakeProvider({
+    onAttach: () => {
+      preferencesAtAttach = media
+        ? { playbackRate: media.playbackRate, volume: media.volume }
+        : undefined;
+    }
+  });
+
+  rerender(interactionFixture({ playbackRate: 1.75, volume: 0.75 }));
+  pending.resolve(fake.adapter);
+
+  await vi.waitFor(() => expect(fake.counts().attachCount).toBe(1));
+  expect(preferencesAtAttach).toEqual({ playbackRate: 1.75, volume: 0.75 });
+  expect(fake.counts()).toMatchObject({
+    playbackRateCount: 0,
+    volumeCount: 0
+  });
 });
 
 test.each(['muted', 'audible'] as const)(
@@ -740,9 +1180,53 @@ test.each(['muted', 'audible'] as const)(
         error: { category: 'configuration' }
       })
     );
+    const activation = screen.getByRole('button', {
+      name: 'Retry loading video'
+    });
+    expect(activation.getAttribute('aria-disabled')).toBe('true');
+    fireEvent.click(activation);
     expect(mockedLoadProvider).not.toHaveBeenCalled();
   }
 );
+
+test('configuration-error activation becomes actionable after configuration is valid', async () => {
+  const fake = createFakeProvider();
+  mockedLoadProvider.mockResolvedValue(fake.adapter);
+  const { rerender } = render(interactionFixture({ autoplay: 'audible' }));
+  const activation = await screen.findByRole('button', {
+    name: 'Retry loading video'
+  });
+  expect(activation.getAttribute('aria-disabled')).toBe('true');
+
+  rerender(interactionFixture({ autoplay: false }));
+
+  await vi.waitFor(() =>
+    expect(activation.getAttribute('aria-disabled')).toBeNull()
+  );
+  fireEvent.click(activation);
+  await vi.waitFor(() => expect(mockedLoadProvider).toHaveBeenCalledOnce());
+});
+
+test('LoadingIndicator suppresses buffering after a terminal activation error', async () => {
+  const fake = createFakeProvider();
+  mockedLoadProvider.mockResolvedValue(fake.adapter);
+  render(interactionFixture());
+  fireEvent.click(screen.getByRole('button', { name: 'Play video' }));
+  await vi.waitFor(() => expect(fake.counts().attachCount).toBe(1));
+
+  act(() =>
+    fake.emit({
+      activation: 'error',
+      buffering: true,
+      lifecycle: 'error'
+    })
+  );
+
+  expect(screen.queryByRole('status')).toBeNull();
+  expect(
+    screen.getByRole('button', { name: 'Retry loading video' })
+  ).toBeDefined();
+});
 
 test('keeps focus and retries after loader failure', async () => {
   const current = createFakeProvider();

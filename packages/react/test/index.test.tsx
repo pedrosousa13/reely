@@ -1025,6 +1025,56 @@ test('passes loop and playback boundaries from Root to the native adapter', asyn
   expect(play).toHaveBeenCalledOnce();
 });
 
+test('replaces the provider once when native playback options change', async () => {
+  const load = vi
+    .spyOn(HTMLMediaElement.prototype, 'load')
+    .mockImplementation(() => undefined);
+  const play = vi
+    .spyOn(HTMLMediaElement.prototype, 'play')
+    .mockImplementation(function (this: HTMLMediaElement) {
+      this.dispatchEvent(new Event('play'));
+      return Promise.resolve();
+    });
+  const handle = createRef<Player.PlayerHandle>();
+  const player = (startTime: number) => (
+    <LegacyRoot
+      autoplay="audible"
+      ref={handle}
+      source="/tracer.mp4"
+      startTime={startTime}
+    >
+      <Player.Media />
+      <Player.PlayButton />
+    </LegacyRoot>
+  );
+  const { rerender } = render(player(0));
+  const media = screen.getByLabelText<HTMLVideoElement>('Reely media');
+  confirmMetadataReady(media);
+  await waitFor(() => expect(play).toHaveBeenCalledOnce());
+  await waitFor(() => expect(load).toHaveBeenCalledOnce());
+  play.mockClear();
+  load.mockClear();
+  const providerStates: Array<string | null> = [];
+  const unsubscribe = handle.current?.subscribe((state) =>
+    providerStates.push(state.provider)
+  );
+  providerStates.length = 0;
+
+  rerender(player(1));
+
+  await waitFor(() => expect(play).toHaveBeenCalledOnce());
+  await waitFor(() => expect(load).toHaveBeenCalledOnce());
+  await waitFor(() =>
+    expect(handle.current?.getState()).toMatchObject({
+      provider: 'native',
+      autoplay: 'started'
+    })
+  );
+  expect(providerStates).toEqual(expect.arrayContaining(['native']));
+  expect(providerStates).not.toContain(null);
+  unsubscribe?.();
+});
+
 test('attaches and loads one provider without detaching on source switch', async () => {
   const load = vi
     .spyOn(HTMLMediaElement.prototype, 'load')

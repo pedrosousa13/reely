@@ -1,14 +1,13 @@
+import { useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import * as Player from '@reely/react';
 
-const autoplayParameter = new URLSearchParams(window.location.search).get(
-  'autoplay'
-);
+const parameters = new URLSearchParams(window.location.search);
+const autoplayParameter = parameters.get('autoplay');
 const autoplay: Player.RootProps['autoplay'] =
   autoplayParameter === 'muted' || autoplayParameter === 'audible'
     ? autoplayParameter
     : false;
-const parameters = new URLSearchParams(window.location.search);
 const loadingParameter = parameters.get('loading');
 const loading: Player.PlayerLoadingStrategy =
   loadingParameter === 'eager' ||
@@ -16,45 +15,74 @@ const loading: Player.PlayerLoadingStrategy =
   loadingParameter === 'viewport'
     ? loadingParameter
     : 'viewport';
-const activationSource =
-  parameters.get('activationSource') === 'external'
+const preloadParameter = parameters.get('preload');
+const preload: Player.PlayerPreload =
+  preloadParameter === 'none' ||
+  preloadParameter === 'metadata' ||
+  preloadParameter === 'auto'
+    ? preloadParameter
+    : 'metadata';
+const defaultMuted = parameters.get('defaultMuted') === 'true';
+const sourceChange = parameters.get('sourceChange') === 'external';
+const activationSource = sourceChange
+  ? 'https://provider.invalid/source-a.mp4'
+  : parameters.get('activationSource') === 'external'
     ? 'https://provider.invalid/tracer.mp4'
     : '/tracer.mp4';
+const replacementSource = sourceChange
+  ? 'https://provider.invalid/source-b.mp4'
+  : null;
+
+const PlayerFixture = () => {
+  const [source, setSource] = useState(activationSource);
+
+  return (
+    <>
+      <Player.Root
+        autoplay={autoplay}
+        defaultMuted={defaultMuted}
+        loading={loading}
+        preload={preload}
+        source={source}
+      >
+        <Player.Viewport
+          data-testid="viewport"
+          style={{ aspectRatio: '16 / 9', maxWidth: '48rem', width: '100%' }}
+        >
+          <Player.Poster>
+            <Player.PosterImage
+              alt=""
+              decoding="async"
+              fetchPriority="high"
+              height={720}
+              loading="eager"
+              objectPosition="30% 40%"
+              sizes="(max-width: 48rem) 100vw, 48rem"
+              src="/poster.svg"
+              srcSet="/poster.svg 640w, /poster.svg 1280w"
+              width={1280}
+            />
+          </Player.Poster>
+          <Player.ActivationButton />
+          <Player.LoadingIndicator />
+          <Player.Media />
+        </Player.Viewport>
+        <Player.PlayButton />
+      </Player.Root>
+      {replacementSource && source !== replacementSource ? (
+        <button onClick={() => setSource(replacementSource)} type="button">
+          Switch to source B
+        </button>
+      ) : null}
+    </>
+  );
+};
 
 const App = () => (
   <>
     <h1>Reely</h1>
     <p>A minimal player with explicit, inspectable media source detection.</p>
-    <Player.Root
-      autoplay={autoplay}
-      loading={loading}
-      preload="metadata"
-      source={activationSource}
-    >
-      <Player.Viewport
-        data-testid="viewport"
-        style={{ aspectRatio: '16 / 9', maxWidth: '48rem', width: '100%' }}
-      >
-        <Player.Poster>
-          <Player.PosterImage
-            alt=""
-            decoding="async"
-            fetchPriority="high"
-            height={720}
-            loading="eager"
-            objectPosition="30% 40%"
-            sizes="(max-width: 48rem) 100vw, 48rem"
-            src="/poster.svg"
-            srcSet="/poster.svg 640w, /poster.svg 1280w"
-            width={1280}
-          />
-        </Player.Poster>
-        <Player.ActivationButton />
-        <Player.LoadingIndicator />
-        <Player.Media />
-      </Player.Viewport>
-      <Player.PlayButton />
-    </Player.Root>
+    <PlayerFixture />
     <h2>Activation loading</h2>
     <p>
       A poster&apos;s <code>loading</code> and <code>fetchPriority</code>{' '}

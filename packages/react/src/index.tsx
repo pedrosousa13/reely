@@ -663,9 +663,10 @@ export const Root = ({
 const assignRef = <Value,>(
   ref: Ref<Value> | undefined,
   value: Value | null
-): void => {
+): (() => void) | undefined => {
   if (typeof ref === 'function') {
-    ref(value);
+    const cleanup = ref(value);
+    return typeof cleanup === 'function' ? cleanup : undefined;
   } else if (ref) {
     ref.current = value;
   }
@@ -675,8 +676,17 @@ export const Viewport = ({ children, ref, style, ...rest }: ViewportProps) => {
   const { registerViewport } = usePlayer();
   const mergedRef = useCallback(
     (node: HTMLDivElement | null) => {
-      assignRef(ref, node);
+      const consumerCleanup = assignRef(ref, node);
       registerViewport(node);
+      if (!node) return;
+      return () => {
+        if (consumerCleanup) {
+          consumerCleanup();
+        } else {
+          assignRef(ref, null);
+        }
+        registerViewport(null);
+      };
     },
     [ref, registerViewport]
   );
@@ -761,21 +771,26 @@ export const ActivationButton = ({
   ...props
 }: ActivationButtonProps) => {
   const { activateFromInteraction, loading } = usePlayer();
-  const activation = usePlayerState((state) => state.activation);
+  const { activation, error } = usePlayerState((state) => ({
+    activation: state.activation,
+    error: state.error
+  }));
   if (loading !== 'interaction' || activation === 'ready') return null;
   const isError = activation === 'error';
   const isLoading = activation === 'loading-provider';
+  const isConfigurationError = isError && error?.category === 'configuration';
+  const isDisabled = isLoading || isConfigurationError;
   const label = ariaLabel ?? (isError ? 'Retry loading video' : 'Play video');
   return (
     <button
       {...props}
-      aria-disabled={isLoading || undefined}
+      aria-disabled={isDisabled || undefined}
       aria-label={label}
       data-reely-part="activation"
       data-state={activation}
       onClick={(event) => {
         onClick?.(event);
-        if (!event.defaultPrevented && !isLoading) {
+        if (!event.defaultPrevented && !isDisabled) {
           activateFromInteraction();
         }
       }}
@@ -806,7 +821,7 @@ export const LoadingIndicator = ({
   const state =
     activation === 'loading-provider'
       ? 'loading-provider'
-      : buffering
+      : activation !== 'error' && buffering
         ? 'buffering'
         : null;
   if (!state) return null;
