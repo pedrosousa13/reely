@@ -98,6 +98,12 @@ importers:
         specifier: workspace:*
         version: link:../core
 
+  packages/provider-youtube:
+    dependencies:
+      '@reely/core':
+        specifier: workspace:*
+        version: link:../core
+
   packages/react:
     dependencies:
       '@reely/core':
@@ -109,6 +115,9 @@ importers:
       '@reely/provider-native':
         specifier: workspace:*
         version: link:../provider-native
+      '@reely/provider-youtube':
+        specifier: workspace:*
+        version: link:../provider-youtube
     devDependencies:
       react:
         specifier: 19.2.8

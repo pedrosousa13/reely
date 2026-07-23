@@ -1,0 +1,592 @@
+import type {
+  Availability,
+  CommandResult,
+  PlayerCapabilities,
+  PlayerError,
+  PlayerEventDetailMap,
+  PlayerEventType,
+  ProviderAdapter,
+  ProviderEvent,
+  ProviderEventFor,
+  ProviderStateListener
+} from '@reely/core';
+import {
+  loadYouTubeIframeApi,
+  type YouTubeIframeApi,
+  type YouTubePlayer
+} from './loader.js';
+
+export {
+  loadYouTubeIframeApi,
+  type YouTubeIframeApi,
+  type YouTubePlayer,
+  type YouTubePlayerConstructor,
+  type YouTubePlayerEventHandlers,
+  type YouTubePlayerOptions
+} from './loader.js';
+
+/**
+ * YouTube reports a blocked autoplay attempt by silently staying paused, so an
+ * unconfirmed play request is reported as blocked after this window.
+ */
+export const PLAYBACK_CONFIRMATION_TIMEOUT_MS = 3_000;
+
+const TIME_UPDATE_INTERVAL_MS = 250;
+
+const playerStates = {
+  UNSTARTED: -1,
+  ENDED: 0,
+  PLAYING: 1,
+  PAUSED: 2,
+  BUFFERING: 3,
+  CUED: 5
+} as const;
+
+export type YouTubeProviderOptions = {
+  /** Embed host; defaults to the privacy-enhanced youtube-nocookie.com. */
+  readonly host?: string;
+  /** Overridable iframe API loader so tests can inject a fake API object. */
+  readonly loadIframeApi?: () => Promise<YouTubeIframeApi>;
+};
+
+type YouTubeCommand =
+  | 'play'
+  | 'pause'
+  | 'seekTo'
+  | 'seekBy'
+  | 'mute'
+  | 'unmute'
+  | 'setVolume'
+  | 'setPlaybackRate'
+  | 'requestFullscreen'
+  | 'exitFullscreen'
+  | 'retry';
+
+export type YouTubeProviderAdapter = ProviderAdapter &
+  Required<Pick<ProviderAdapter, YouTubeCommand>> & {
+    readonly provider: 'youtube';
+  };
+
+const available: Availability = { status: 'available' };
+const notReady: Availability = { status: 'unknown', reason: 'not-ready' };
+const providerUnavailable: Availability = {
+  status: 'unavailable',
+  reason: 'provider'
+};
+const policyUnavailable: Availability = {
+  status: 'unavailable',
+  reason: 'policy'
+};
+const browserUnavailable: Availability = {
+  status: 'unavailable',
+  reason: 'browser'
+};
+
+const fixedCapabilities = {
+  selectQuality: providerUnavailable,
+  selectTextTrack: providerUnavailable,
+  pictureInPicture: providerUnavailable,
+  airPlay: providerUnavailable,
+  customControls: policyUnavailable
+} as const;
+
+const preReadyCapabilities = (): PlayerCapabilities => ({
+  seek: notReady,
+  setVolume: notReady,
+  setPlaybackRate: notReady,
+  fullscreen: notReady,
+  ...fixedCapabilities
+});
+
+const readyCapabilities = (fullscreen: Availability): PlayerCapabilities => ({
+  seek: available,
+  setVolume: available,
+  setPlaybackRate: available,
+  fullscreen,
+  ...fixedCapabilities
+});
+
+const playbackError = (code: number): PlayerError => {
+  if (code === 101 || code === 150) {
+    return {
+      category: 'policy',
+      fatal: true,
+      recoverable: false,
+      message: 'The video owner does not allow embedded playback.'
+    };
+  }
+  if (code === 100) {
+    return {
+      category: 'source',
+      fatal: true,
+      recoverable: false,
+      message: 'The YouTube video was not found or is private.'
+    };
+  }
+  if (code === 2) {
+    return {
+      category: 'source',
+      fatal: true,
+      recoverable: false,
+      message: 'The YouTube video id or player parameters are invalid.'
+    };
+  }
+  return {
+    category: 'provider',
+    fatal: true,
+    recoverable: true,
+    message: `The YouTube player failed with error code ${code}.`
+  };
+};
+
+const blockedError = (): PlayerError => ({
+  category: 'policy',
+  fatal: false,
+  recoverable: true,
+  message:
+    'YouTube did not confirm playback; autoplay was likely blocked by the browser.'
+});
+
+const commandFailure = (
+  cause: unknown
+): Exclude<CommandResult, { ok: true }> => ({
+  ok: false,
+  reason: 'provider-error',
+  error: {
+    category: 'provider',
+    fatal: false,
+    recoverable: true,
+    message:
+      cause instanceof Error ? cause.message : 'The YouTube command failed.',
+    cause
+  }
+});
+
+const loadFailure = (cause: unknown): Exclude<CommandResult, { ok: true }> => ({
+  ok: false,
+  reason: 'provider-error',
+  error: {
+    category: 'provider',
+    fatal: false,
+    recoverable: true,
+    message:
+      cause instanceof Error
+        ? cause.message
+        : 'The YouTube iframe API could not be loaded.',
+    cause
+  }
+});
+
+const clamp01 = (value: number): number => Math.min(1, Math.max(0, value));
+
+type PendingPlay = {
+  readonly resolve: (result: CommandResult) => void;
+  readonly timer: ReturnType<typeof setTimeout>;
+};
+
+export const createYouTubeProvider = (
+  mount: HTMLElement,
+  videoId: string,
+  options: YouTubeProviderOptions = {}
+): YouTubeProviderAdapter => {
+  const listeners = new Set<ProviderStateListener>();
+  const ownerDocument = mount.ownerDocument;
+  const host = options.host ?? 'https://www.youtube-nocookie.com';
+  const loadIframeApi = options.loadIframeApi ?? loadYouTubeIframeApi;
+  let attached = false;
+  let destroyed = false;
+  let loadRequested = false;
+  let ready = false;
+  let generation = 0;
+  let player: YouTubePlayer | undefined;
+  let playerTarget: HTMLElement | undefined;
+  let pendingPlays: PendingPlay[] = [];
+  let timeInterval: ReturnType<typeof setInterval> | undefined;
+
+  const emit = (
+    patch: Parameters<ProviderStateListener>[0],
+    event?: ProviderEvent
+  ): void => listeners.forEach((listener) => listener(patch, event));
+
+  const event = <Type extends PlayerEventType>(
+    type: Type,
+    detail: PlayerEventDetailMap[Type],
+    originalEvent?: unknown
+  ): ProviderEventFor<Type> => ({
+    type,
+    detail,
+    origin: 'provider',
+    ...(originalEvent === undefined ? {} : { originalEvent })
+  });
+
+  const safeIframe = (): HTMLIFrameElement | undefined => {
+    try {
+      return player?.getIframe() ?? undefined;
+    } catch {
+      return undefined;
+    }
+  };
+
+  const settlePendingPlays = (result: CommandResult): void => {
+    const settled = pendingPlays;
+    pendingPlays = [];
+    settled.forEach(({ resolve, timer }) => {
+      clearTimeout(timer);
+      resolve(result);
+    });
+  };
+
+  const stopTimePolling = (): void => {
+    if (timeInterval === undefined) return;
+    clearInterval(timeInterval);
+    timeInterval = undefined;
+  };
+
+  const startTimePolling = (): void => {
+    if (timeInterval !== undefined) return;
+    timeInterval = setInterval(() => {
+      const current = player;
+      if (destroyed || !current) return;
+      try {
+        emit({ currentTime: current.getCurrentTime() });
+      } catch {
+        // Polling must not escape the provider boundary.
+      }
+    }, TIME_UPDATE_INTERVAL_MS);
+  };
+
+  const fullscreenElementIsOurs = (): boolean => {
+    const fullscreenElement = ownerDocument.fullscreenElement;
+    if (!fullscreenElement) return false;
+    const iframe = safeIframe();
+    return (
+      fullscreenElement === iframe ||
+      fullscreenElement === mount ||
+      mount.contains(fullscreenElement)
+    );
+  };
+
+  const onFullscreenChange = (originalEvent: Event): void => {
+    if (destroyed) return;
+    const fullscreen = fullscreenElementIsOurs();
+    emit(
+      { fullscreen },
+      event('fullscreenchange', { fullscreen }, originalEvent)
+    );
+  };
+
+  const emitReadyState = (): void => {
+    const current = player;
+    if (!current) return;
+    const duration = current.getDuration();
+    const iframe = safeIframe();
+    emit(
+      {
+        lifecycle: 'ready',
+        activation: 'ready',
+        currentTime: current.getCurrentTime(),
+        duration: Number.isFinite(duration) && duration > 0 ? duration : null,
+        muted: current.isMuted(),
+        volume: clamp01(current.getVolume() / 100),
+        playbackRate: current.getPlaybackRate(),
+        capabilities: readyCapabilities(
+          typeof iframe?.requestFullscreen === 'function'
+            ? available
+            : browserUnavailable
+        )
+      },
+      event('ready', undefined)
+    );
+  };
+
+  const emitVolumeState = (): void => {
+    const current = player;
+    if (!current) return;
+    const muted = current.isMuted();
+    const volume = clamp01(current.getVolume() / 100);
+    emit({ muted, volume }, event('volumechange', { muted, volume }));
+  };
+
+  const onPlayerStateChange = (data: number): void => {
+    const current = player;
+    if (destroyed || !current) return;
+    if (data === playerStates.PLAYING) {
+      settlePendingPlays({ ok: true });
+      const duration = current.getDuration();
+      emit(
+        {
+          playback: 'playing',
+          buffering: false,
+          currentTime: current.getCurrentTime(),
+          duration: Number.isFinite(duration) && duration > 0 ? duration : null
+        },
+        event('play', undefined)
+      );
+      startTimePolling();
+      return;
+    }
+    if (data === playerStates.PAUSED) {
+      stopTimePolling();
+      emit(
+        { playback: 'paused', currentTime: current.getCurrentTime() },
+        event('pause', undefined)
+      );
+      return;
+    }
+    if (data === playerStates.ENDED) {
+      stopTimePolling();
+      emit(
+        {
+          playback: 'ended',
+          buffering: false,
+          currentTime: current.getCurrentTime()
+        },
+        event('ended', undefined)
+      );
+      return;
+    }
+    if (data === playerStates.BUFFERING) {
+      emit({ buffering: true });
+      return;
+    }
+    if (data === playerStates.CUED) {
+      emit({ buffering: false });
+    }
+  };
+
+  const onPlayerError = (code: number): void => {
+    if (destroyed) return;
+    stopTimePolling();
+    const error = playbackError(code);
+    settlePendingPlays({ ok: false, reason: 'provider-error', error });
+    emit(
+      {
+        lifecycle: 'error',
+        activation: 'error',
+        buffering: false,
+        error
+      },
+      event('error', error)
+    );
+  };
+
+  const teardownPlayer = (): void => {
+    settlePendingPlays({ ok: false, reason: 'not-ready' });
+    stopTimePolling();
+    ready = false;
+    const current = player;
+    player = undefined;
+    if (current) {
+      try {
+        current.destroy();
+      } catch {
+        // Teardown must not escape the provider boundary.
+      }
+    }
+    playerTarget?.remove();
+    playerTarget = undefined;
+  };
+
+  const start = async (forGeneration: number): Promise<void> => {
+    const api = await loadIframeApi();
+    if (destroyed || forGeneration !== generation) return;
+    const target = ownerDocument.createElement('div');
+    mount.appendChild(target);
+    playerTarget = target;
+    player = new api.Player(target, {
+      host,
+      videoId,
+      width: '100%',
+      height: '100%',
+      playerVars: { autoplay: 0, playsinline: 1, rel: 0 },
+      events: {
+        onReady: () => {
+          if (destroyed || forGeneration !== generation) return;
+          ready = true;
+          emitReadyState();
+        },
+        onStateChange: ({ data }) => {
+          if (destroyed || forGeneration !== generation) return;
+          onPlayerStateChange(data);
+        },
+        onError: ({ data }) => {
+          if (destroyed || forGeneration !== generation) return;
+          onPlayerError(data);
+        },
+        onPlaybackRateChange: ({ data }) => {
+          if (destroyed || forGeneration !== generation) return;
+          emit(
+            { playbackRate: data },
+            event('ratechange', { playbackRate: data })
+          );
+        }
+      }
+    });
+  };
+
+  const guardReady = (): YouTubePlayer | undefined =>
+    destroyed || !ready ? undefined : player;
+
+  const runCommand = async (
+    command: (current: YouTubePlayer) => void
+  ): Promise<CommandResult> => {
+    const current = guardReady();
+    if (!current) return { ok: false, reason: 'not-ready' };
+    try {
+      command(current);
+      return { ok: true };
+    } catch (cause) {
+      return commandFailure(cause);
+    }
+  };
+
+  const seekToTime = (time: number): Promise<CommandResult> => {
+    if (!Number.isFinite(time)) {
+      return Promise.resolve({ ok: false, reason: 'provider-error' });
+    }
+    const target = Math.max(0, time);
+    return runCommand((current) => {
+      current.seekTo(target, true);
+      emit({ currentTime: current.getCurrentTime() });
+    });
+  };
+
+  return {
+    provider: 'youtube',
+    attach: () => {
+      if (attached || destroyed) return;
+      attached = true;
+      ownerDocument.addEventListener('fullscreenchange', onFullscreenChange);
+      emit({
+        lifecycle: 'loading',
+        activation: 'loading-provider',
+        capabilities: preReadyCapabilities()
+      });
+    },
+    load: async () => {
+      if (destroyed || loadRequested) return;
+      loadRequested = true;
+      await start(generation);
+    },
+    destroy: () => {
+      if (destroyed) return;
+      destroyed = true;
+      generation += 1;
+      teardownPlayer();
+      if (attached) {
+        ownerDocument.removeEventListener(
+          'fullscreenchange',
+          onFullscreenChange
+        );
+      }
+      listeners.clear();
+    },
+    subscribe: (listener) => {
+      listeners.add(listener);
+      return () => listeners.delete(listener);
+    },
+    play: () => {
+      const current = guardReady();
+      if (!current) {
+        return Promise.resolve({ ok: false, reason: 'not-ready' });
+      }
+      if (current.getPlayerState() === playerStates.PLAYING) {
+        return Promise.resolve({ ok: true });
+      }
+      return new Promise<CommandResult>((resolve) => {
+        const pending: PendingPlay = {
+          resolve,
+          timer: setTimeout(() => {
+            pendingPlays = pendingPlays.filter((entry) => entry !== pending);
+            resolve({ ok: false, reason: 'blocked', error: blockedError() });
+          }, PLAYBACK_CONFIRMATION_TIMEOUT_MS)
+        };
+        pendingPlays.push(pending);
+        try {
+          current.playVideo();
+        } catch (cause) {
+          pendingPlays = pendingPlays.filter((entry) => entry !== pending);
+          clearTimeout(pending.timer);
+          resolve(commandFailure(cause));
+        }
+      });
+    },
+    pause: () => runCommand((current) => current.pauseVideo()),
+    seekTo: (time) => seekToTime(time),
+    seekBy: (offset) => {
+      if (!Number.isFinite(offset)) {
+        return Promise.resolve({ ok: false, reason: 'provider-error' });
+      }
+      const current = guardReady();
+      if (!current) return Promise.resolve({ ok: false, reason: 'not-ready' });
+      return seekToTime(current.getCurrentTime() + offset);
+    },
+    mute: () =>
+      runCommand((current) => {
+        current.mute();
+        emitVolumeState();
+      }),
+    unmute: () =>
+      runCommand((current) => {
+        current.unMute();
+        emitVolumeState();
+      }),
+    setVolume: (volume) => {
+      if (!Number.isFinite(volume)) {
+        return Promise.resolve({ ok: false, reason: 'provider-error' });
+      }
+      return runCommand((current) => {
+        current.setVolume(Math.round(clamp01(volume) * 100));
+        emitVolumeState();
+      });
+    },
+    setPlaybackRate: (rate) => {
+      if (!Number.isFinite(rate) || rate <= 0) {
+        return Promise.resolve({ ok: false, reason: 'provider-error' });
+      }
+      return runCommand((current) => current.setPlaybackRate(rate));
+    },
+    requestFullscreen: async () => {
+      if (destroyed || !player) return { ok: false, reason: 'not-ready' };
+      // Fullscreen must wrap the whole iframe: YouTube policy requires the
+      // provider chrome to stay visible and interactive.
+      const target = safeIframe() ?? mount;
+      if (typeof target.requestFullscreen !== 'function') {
+        return { ok: false, reason: 'unsupported' };
+      }
+      try {
+        await target.requestFullscreen();
+        return { ok: true };
+      } catch (cause) {
+        return commandFailure(cause);
+      }
+    },
+    exitFullscreen: async () => {
+      if (!fullscreenElementIsOurs()) return { ok: true };
+      if (typeof ownerDocument.exitFullscreen !== 'function') {
+        return { ok: false, reason: 'unsupported' };
+      }
+      try {
+        await ownerDocument.exitFullscreen();
+        return { ok: true };
+      } catch (cause) {
+        return commandFailure(cause);
+      }
+    },
+    retry: async () => {
+      if (destroyed) return { ok: false, reason: 'not-ready' };
+      const forGeneration = ++generation;
+      teardownPlayer();
+      loadRequested = true;
+      try {
+        await start(forGeneration);
+        return { ok: true };
+      } catch (cause) {
+        if (destroyed || forGeneration !== generation) {
+          return { ok: false, reason: 'not-ready' };
+        }
+        return loadFailure(cause);
+      }
+    }
+  };
+};
