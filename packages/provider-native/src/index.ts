@@ -38,6 +38,9 @@ type WebKitHTMLVideoElement = HTMLVideoElement & {
   ) => boolean;
   readonly webkitSetPresentationMode?: (mode: WebKitPresentationMode) => void;
   readonly webkitPresentationMode?: WebKitPresentationMode;
+  readonly webkitShowPlaybackTargetPicker?: () => void;
+  readonly webkitCurrentPlaybackTargetIsWireless?: boolean;
+  readonly disableRemotePlayback?: boolean;
 };
 
 export type NativePlaybackOptions = {
@@ -59,6 +62,7 @@ type NativeCommand =
   | 'exitFullscreen'
   | 'requestPictureInPicture'
   | 'exitPictureInPicture'
+  | 'showAirPlayPicker'
   | 'retry';
 
 export type NativeProviderAdapter = ProviderAdapter &
@@ -254,6 +258,19 @@ export const createNativeProvider = (
     return supportsWebKitPictureInPicture() ? available : unsupported;
   };
 
+  // WebKit is the only engine exposing a native AirPlay route picker. Blink and
+  // Gecko have no equivalent, so AirPlay reports unavailable there.
+  const airPlayDisallowed = (): boolean =>
+    media.getAttribute('x-webkit-airplay') === 'deny' ||
+    webkitMedia.disableRemotePlayback === true;
+
+  const airPlayAvailability = (): Availability => {
+    if (typeof webkitMedia.webkitShowPlaybackTargetPicker !== 'function') {
+      return unsupported;
+    }
+    return airPlayDisallowed() ? policyDisallowed : available;
+  };
+
   const emitMediaState = (originalEvent?: Event): void =>
     emit(
       {
@@ -280,7 +297,7 @@ export const createNativeProvider = (
           selectTextTrack: { status: 'unavailable', reason: 'provider' },
           fullscreen: fullscreenAvailability(),
           pictureInPicture: pictureInPictureAvailability(),
-          airPlay: { status: 'unknown', reason: 'provider-check' },
+          airPlay: airPlayAvailability(),
           customControls: available
         }
       },
@@ -716,6 +733,16 @@ export const createNativeProvider = (
       if (!ownerDocument.exitPictureInPicture)
         return { ok: false, reason: 'unsupported' };
       return runCommand(() => ownerDocument.exitPictureInPicture());
+    },
+    showAirPlayPicker: async () => {
+      const showPicker = webkitMedia.webkitShowPlaybackTargetPicker;
+      if (typeof showPicker !== 'function') {
+        return { ok: false, reason: 'unsupported' };
+      }
+      if (airPlayDisallowed()) {
+        return policyBlocked('AirPlay is disabled on this media element.');
+      }
+      return runCommand(() => showPicker.call(media));
     },
     retry: () => {
       ++replayGeneration;
