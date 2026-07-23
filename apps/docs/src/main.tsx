@@ -29,6 +29,10 @@ const preload: Player.PlayerPreload =
     ? preloadParameter
     : 'metadata';
 const defaultMuted = parameters.get('defaultMuted') === 'true';
+// The AirPlay demo control is gated so the default fixture keeps a single
+// page-global "Play" button: "AirPlay" matches getByRole('button', {name:'Play'})
+// as a substring, which would otherwise break the default-fixture specs.
+const airplayDemo = parameters.get('airplay') === 'demo';
 const sourceChange = parameters.get('sourceChange') === 'external';
 const engineParameter = parameters.get('engine');
 const hlsEngine: 'auto' | 'native' | 'hls.js' =
@@ -49,14 +53,16 @@ const vimeoSource: Player.RootProps['source'] | null =
 const activationSource: Player.RootProps['source'] =
   sourceParameter === 'hls'
     ? { type: 'hls', src: '/hls/master.m3u8', engine: hlsEngine }
-    : (vimeoSource ??
-      (sourceChange
-        ? 'https://provider.invalid/source-a.mp4'
-        : parameters.get('activationSource') === 'external'
-          ? 'https://provider.invalid/tracer.mp4'
-          : parameters.get('activationSource') === 'youtube'
-            ? youtubeExampleUrl
-            : '/tracer.mp4'));
+    : sourceParameter === 'live'
+      ? { type: 'hls', src: '/live/index.m3u8', engine: hlsEngine }
+      : (vimeoSource ??
+        (sourceChange
+          ? 'https://provider.invalid/source-a.mp4'
+          : parameters.get('activationSource') === 'external'
+            ? 'https://provider.invalid/tracer.mp4'
+            : parameters.get('activationSource') === 'youtube'
+              ? youtubeExampleUrl
+              : '/tracer.mp4'));
 const replacementSource = sourceChange
   ? 'https://provider.invalid/source-b.mp4'
   : null;
@@ -74,6 +80,11 @@ const PresentationControls = () => {
     pictureInPictureReason:
       'reason' in state.capabilities.pictureInPicture
         ? state.capabilities.pictureInPicture.reason
+        : undefined,
+    airPlayStatus: state.capabilities.airPlay.status,
+    airPlayReason:
+      'reason' in state.capabilities.airPlay
+        ? state.capabilities.airPlay.reason
         : undefined
   }));
   const actions = Player.usePlayerActions();
@@ -87,6 +98,8 @@ const PresentationControls = () => {
       data-pip-status={presentation.pictureInPictureStatus}
       data-pip-reason={presentation.pictureInPictureReason}
       data-pip-state={presentation.pictureInPicture ? 'active' : 'inline'}
+      data-airplay-status={presentation.airPlayStatus}
+      data-airplay-reason={presentation.airPlayReason}
     >
       {presentation.fullscreenStatus === 'available' ? (
         <button
@@ -116,6 +129,15 @@ const PresentationControls = () => {
             : 'Enter picture-in-picture'}
         </button>
       ) : null}{' '}
+      {airplayDemo && presentation.airPlayStatus === 'available' ? (
+        <button
+          data-testid="airplay-picker"
+          onClick={() => void actions.showAirPlayPicker()}
+          type="button"
+        >
+          AirPlay
+        </button>
+      ) : null}{' '}
       Fullscreen: {presentation.fullscreenStatus}
       {presentation.fullscreenReason
         ? ` (${presentation.fullscreenReason})`
@@ -141,6 +163,91 @@ const StateProbes = () => {
   );
 };
 
+const formatClock = (seconds: number): string => {
+  // Never renders NaN or a negative value: unusable inputs collapse to 0:00.
+  const safe = Number.isFinite(seconds) && seconds > 0 ? seconds : 0;
+  const whole = Math.floor(safe);
+  const minutes = Math.floor(whole / 60);
+  const secs = whole % 60;
+  return `${minutes}:${secs.toString().padStart(2, '0')}`;
+};
+
+const LiveControls = () => {
+  const live = Player.usePlayerState((state) => ({
+    isLive: state.live?.isLive ?? false,
+    atLiveEdge: state.live?.atLiveEdge ?? false,
+    known: state.live !== null,
+    currentTime: state.currentTime,
+    duration: state.duration,
+    seekableEnd:
+      state.seekable.length > 0
+        ? Math.max(...state.seekable.map((range) => range.end))
+        : null,
+    seekableStart:
+      state.seekable.length > 0
+        ? Math.min(...state.seekable.map((range) => range.start))
+        : null,
+    seekStatus: state.capabilities.seek.status
+  }));
+  const actions = Player.usePlayerActions();
+
+  // While live the seek slider maps the moving window; the time display shows
+  // how far behind the live edge the position is, never a fixed duration.
+  const behindEdgeSeconds =
+    live.isLive && live.seekableEnd !== null
+      ? Math.max(0, live.seekableEnd - live.currentTime)
+      : 0;
+  const timeLabel = live.isLive
+    ? live.atLiveEdge
+      ? 'LIVE'
+      : `-${formatClock(behindEdgeSeconds)}`
+    : `${formatClock(live.currentTime)} / ${formatClock(live.duration ?? 0)}`;
+
+  return (
+    <p
+      data-testid="live-panel"
+      data-live-known={live.known ? 'true' : 'false'}
+      data-live-status={live.isLive ? 'live' : 'vod'}
+      data-live-edge={
+        live.isLive ? (live.atLiveEdge ? 'at-edge' : 'behind-edge') : 'none'
+      }
+      data-seek-status={live.seekStatus}
+    >
+      <span data-testid="live-indicator">
+        {live.isLive ? (live.atLiveEdge ? 'LIVE' : 'BEHIND LIVE') : 'VOD'}
+      </span>{' '}
+      · <span data-testid="live-time">{timeLabel}</span>{' '}
+      {live.isLive && live.seekStatus === 'available' ? (
+        <>
+          <button
+            data-testid="live-seek-back"
+            onClick={() =>
+              void (
+                live.seekableStart !== null &&
+                actions.seekTo(live.seekableStart)
+              )
+            }
+            type="button"
+          >
+            Jump to start
+          </button>{' '}
+          <button
+            data-testid="live-seek-edge"
+            onClick={() =>
+              void (
+                live.seekableEnd !== null && actions.seekTo(live.seekableEnd)
+              )
+            }
+            type="button"
+          >
+            Jump to live
+          </button>
+        </>
+      ) : null}
+    </p>
+  );
+};
+
 const PlayerFixture = () => {
   const [source, setSource] = useState(activationSource);
 
@@ -150,6 +257,13 @@ const PlayerFixture = () => {
         autoplay={autoplay}
         defaultMuted={defaultMuted}
         loading={loading}
+        mediaMetadata={{
+          title: 'Reely tracer',
+          artist: 'Reely',
+          artwork: [
+            { src: '/poster.svg', sizes: '1280x720', type: 'image/svg+xml' }
+          ]
+        }}
         preload={preload}
         ref={(handle) => {
           window.reelyHandle = handle ?? undefined;
@@ -180,6 +294,7 @@ const PlayerFixture = () => {
         </Player.Viewport>
         <Player.PlayButton />
         <PresentationControls />
+        <LiveControls />
         <StateProbes />
       </Player.Root>
       {replacementSource && source !== replacementSource ? (
@@ -409,6 +524,40 @@ await selectQuality(null) // back to automatic adaptation`}</pre>
       errors map to <code>network</code>, <code>decode</code>, or{' '}
       <code>source</code> exactly as for MP4 playback.
     </p>
+    <h3>Live streams</h3>
+    <p>
+      Ordinary live HLS is supported. Liveness is derived from stream data, not
+      from the source URL: the hls.js live flag when the engine reports one, and
+      otherwise an infinite media duration. A stream whose URL contains no hint
+      of &quot;live&quot; is still detected as live. The normalized status is{' '}
+      <code>
+        state.live: {'{'} isLive: boolean; atLiveEdge: boolean {'}'} | null
+      </code>
+      , where <code>null</code> means not live or not yet known. Try{' '}
+      <code>?source=live</code> on this page.
+    </p>
+    <p>
+      Controls adapt to the moving seekable window. While live, the reported
+      duration is <code>null</code> rather than a false fixed duration, so time
+      displays never show <code>NaN</code>, a negative range, or an invented
+      end. The seek slider maps the current seekable window, which slides
+      forward as new segments arrive and old ones fall off; the time display
+      shows the position relative to the live edge (at the edge, or how far
+      behind it), and a live indicator distinguishes at-edge from behind-edge
+      playback. Seeking behind the live edge stays within the window. When the
+      window is too small to scrub, <code>capabilities.seek</code> reports{' '}
+      <code>unavailable</code> with reason <code>source</code> so a control
+      layer can hide a meaningless slider. When a live stream ends and becomes
+      VOD-like, <code>state.live</code> returns to <code>null</code> and the
+      now-finite duration is restored without a frozen UI. Reconnection reuses
+      the same bounded network and media recovery as VOD playback.
+    </p>
+    <p>
+      <strong>MVP scope.</strong> This is <em>ordinary</em> live only.
+      Low-latency HLS (LL-HLS) tuning, DVR-specialized controls (long rewind
+      windows, program markers), and aggressive live-edge latency tuning are out
+      of scope and deliberately not implemented.
+    </p>
     <h2>YouTube</h2>
     <p>
       YouTube sources load the YouTube iframe player on demand: no YouTube code
@@ -566,6 +715,52 @@ await seekTo(30) // { ok: true } or { ok: false, reason, error? }`}</pre>
       provider state, so use player actions to request play or pause and read
       the result with <code>usePlayerState</code>.
     </p>
+    <h2>Transport controls</h2>
+    <p>
+      The transport primitives are headless: each renders a real native element
+      (a <code>&lt;button&gt;</code> or a native range slider) with stable{' '}
+      <code>data-reely-part</code>, <code>data-state</code>, and{' '}
+      <code>data-provider</code> attributes plus the matching ARIA state, and
+      every one accepts <code>className</code>, <code>style</code>,{' '}
+      <code>ref</code>, and replacement children. Capability-gated controls
+      render nothing while their capability is <code>unavailable</code> or still{' '}
+      <code>unknown</code> — they never flash in or render disabled-but-visible.
+      Compose them yourself:
+    </p>
+    <pre>{`<Player.PlayButton />           // Space/K, toggles play & pause
+<Player.MuteButton />           // shown once setVolume resolves
+<Player.VolumeSlider />         // native range, 0..1, aria-valuetext "60%"
+<Player.SeekSlider />           // native range + buffered ranges from state
+<Player.Time type="current" />  // "current" | "duration" | "remaining"
+<Player.FullscreenButton />     // absent until fullscreen capability resolves
+<Player.PipButton />            // absent until picture-in-picture resolves`}</pre>
+    <p>
+      <code>Player.Controls</code> is the container that scopes keyboard
+      shortcuts to itself. While focus is inside it, Space/K toggle play,
+      Left/Right seek ±5s, J/L seek ±10s, Up/Down change volume, M mutes, and F
+      toggles fullscreen. Shortcuts ignore inputs, textareas, contenteditable
+      regions, and open menus; pass <code>global</code> to opt into
+      document-level shortcuts instead. Focus is kept inside the region when a
+      capability-gated control disappears, so keyboard users never drop to{' '}
+      <code>&lt;body&gt;</code>.
+    </p>
+    <pre>{`<Player.Controls aria-label="Video player controls">
+  <Player.PlayButton />
+  <Player.MuteButton />
+  <Player.VolumeSlider />
+  <Player.SeekSlider />
+  <Player.Time type="current" /> / <Player.Time type="duration" />
+  <Player.FullscreenButton />
+  <Player.PipButton />
+</Player.Controls>`}</pre>
+    <p>
+      <code>Player.LoadingIndicator</code> is a polite live region that appears
+      only while the provider is loading or the media is buffering. Replace its
+      children with your own spinner:
+    </p>
+    <pre>{`<Player.LoadingIndicator>
+  <MySpinner />
+</Player.LoadingIndicator>`}</pre>
     <h2>Fullscreen and Picture-in-Picture</h2>
     <p>
       <code>requestFullscreen</code>, <code>exitFullscreen</code>,{' '}
@@ -646,6 +841,110 @@ const { requestFullscreen } = Player.usePlayerActions()
       . A media element with <code>disablePictureInPicture</code> reports the
       capability as <code>unavailable</code> with reason <code>policy</code>.
     </p>
+    <h2>AirPlay and Media Session</h2>
+    <p>
+      <code>showAirPlayPicker()</code> opens the native AirPlay route picker. It
+      is a WebKit-only action (<code>webkitShowPlaybackTargetPicker</code>):
+      gate it on <code>capabilities.airPlay</code> being <code>available</code>.
+      On non-WebKit engines the capability reports <code>unavailable</code> with
+      reason <code>browser</code>; a media element that opts out of AirPlay (
+      <code>x-webkit-airplay=&quot;deny&quot;</code> or{' '}
+      <code>disableRemotePlayback</code>) reports <code>unavailable</code> with
+      reason <code>policy</code>. Like fullscreen, permission and user-gesture
+      failures resolve to{' '}
+      <code>
+        {'{'} ok: false, reason: 'blocked' {'}'}
+      </code>{' '}
+      instead of throwing.
+    </p>
+    <pre>{`const airPlay = Player.usePlayerState((state) => state.capabilities.airPlay)
+const { showAirPlayPicker } = Player.usePlayerActions()
+
+{airPlay.status === 'available' && (
+  <button onClick={() => void showAirPlayPicker()}>AirPlay</button>
+)}`}</pre>
+    <p>
+      Media Session powers lock-screen and hardware-key controls. Reely never
+      scrapes metadata from the media source: pass it explicitly through the{' '}
+      <code>mediaMetadata</code> prop, and Reely wires the play, pause, and seek
+      action handlers to the player. Metadata and handlers are cleaned up on
+      source change and unmount.
+    </p>
+    <pre>{`<Player.Root
+  source="/video.mp4"
+  mediaMetadata={{
+    title: 'Episode 1',
+    artist: 'Reely',
+    artwork: [{ src: '/art.png', sizes: '512x512', type: 'image/png' }],
+  }}
+>...</Player.Root>`}</pre>
+    <h3>Single-session ownership</h3>
+    <p>
+      A document has exactly one <code>navigator.mediaSession</code>. When a
+      page hosts several players, the <strong>most-recently-playing</strong>{' '}
+      Reely root owns the metadata and action handlers. A root releases
+      ownership when another root starts playing, on teardown, or on unmount,
+      and it never clears handlers it does not own, so the lock screen always
+      reflects the player the listener last started.
+    </p>
+    <p>
+      <strong>Media Session is not exclusive playback.</strong> It arbitrates
+      only the lock-screen surface; it does not pause other players. Two Reely
+      roots can play at the same time, and only the lock-screen controls follow
+      the most recent one. Enforcing a single active player (exclusive playback
+      groups) is a separate concern and is out of scope for the MVP.
+    </p>
+    <h3>Platform support matrix</h3>
+    <table>
+      <thead>
+        <tr>
+          <th>Platform</th>
+          <th>AirPlay picker</th>
+          <th>Media Session</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Safari (macOS, iPadOS)</td>
+          <td>
+            <code>webkitShowPlaybackTargetPicker</code> — available
+          </td>
+          <td>Available (lock screen / Control Center)</td>
+        </tr>
+        <tr>
+          <td>Safari (iPhone)</td>
+          <td>
+            <code>webkitShowPlaybackTargetPicker</code> — available
+          </td>
+          <td>Available (lock screen)</td>
+        </tr>
+        <tr>
+          <td>Chrome / Edge (desktop, Android)</td>
+          <td>
+            No WebKit picker — <code>unavailable</code> (reason{' '}
+            <code>browser</code>); cast lives in the browser menu
+          </td>
+          <td>Available (hardware keys, Android media notification)</td>
+        </tr>
+        <tr>
+          <td>Firefox (desktop, Android)</td>
+          <td>
+            <code>unavailable</code> (reason <code>browser</code>)
+          </td>
+          <td>Available (hardware keys)</td>
+        </tr>
+        <tr>
+          <td>
+            <code>x-webkit-airplay=&quot;deny&quot;</code> /{' '}
+            <code>disableRemotePlayback</code>
+          </td>
+          <td>
+            <code>unavailable</code> (reason <code>policy</code>)
+          </td>
+          <td>n/a</td>
+        </tr>
+      </tbody>
+    </table>
     <h2>Autoplay</h2>
     <p>
       Set <code>autoplay</code> to <code>false</code> (the default),{' '}

@@ -3,6 +3,7 @@ import { expect, test, type Page } from '@playwright/test';
 type PresentationExpectation = {
   fullscreen: string;
   pictureInPicture: string;
+  airPlay: string;
 };
 
 const capabilities = (page: Page) =>
@@ -48,7 +49,16 @@ const environmentExpectation = (page: Page): Promise<PresentationExpectation> =>
           : supportsWebKitPictureInPicture
             ? 'available'
             : 'unavailable';
-    return { fullscreen, pictureInPicture };
+    const airPlayDenied =
+      media.getAttribute('x-webkit-airplay') === 'deny' ||
+      media.disableRemotePlayback === true;
+    const airPlay =
+      typeof media.webkitShowPlaybackTargetPicker !== 'function'
+        ? 'unavailable'
+        : airPlayDenied
+          ? 'unavailable'
+          : 'available';
+    return { fullscreen, pictureInPicture, airPlay };
   });
 
 test('platform capability reporting matches what the browser supports', async ({
@@ -67,6 +77,42 @@ test('platform capability reporting matches what the browser supports', async ({
     'data-pip-status',
     expected.pictureInPicture
   );
+  await expect(capabilities(page)).toHaveAttribute(
+    'data-airplay-status',
+    expected.airPlay
+  );
+});
+
+test('platform AirPlay capability is WebKit-only and gates the picker control', async ({
+  browserName,
+  page
+}) => {
+  // The AirPlay demo control is gated behind ?airplay=demo so it never adds a
+  // second page-global "Play"-named button to the default fixture.
+  await page.goto('/?airplay=demo', { waitUntil: 'domcontentloaded' });
+  await awaitCapabilityResolution(page);
+
+  // AirPlay availability is API-support driven, so the reported capability must
+  // match what the current engine actually exposes. Real route availability and
+  // the picker UI are covered by the manual device matrix.
+  const expected = await environmentExpectation(page);
+  await expect(capabilities(page)).toHaveAttribute(
+    'data-airplay-status',
+    expected.airPlay
+  );
+  await expect(page.getByTestId('airplay-picker')).toHaveCount(
+    expected.airPlay === 'available' ? 1 : 0
+  );
+
+  if (browserName === 'chromium' || browserName === 'firefox') {
+    // Only WebKit exposes a programmatic AirPlay route picker; everywhere else
+    // the capability is unavailable with reason browser.
+    expect(expected.airPlay).toBe('unavailable');
+    await expect(capabilities(page)).toHaveAttribute(
+      'data-airplay-reason',
+      'browser'
+    );
+  }
 });
 
 test('platform capability gating shows presentation controls only when available', async ({

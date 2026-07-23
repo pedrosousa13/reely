@@ -1,0 +1,53 @@
+import * as Player from '@reely/react';
+import type { Meta, StoryObj } from '@storybook/react-vite';
+import { expect } from 'storybook/test';
+import { available, notReady, ready } from './support';
+
+const meta = {
+  title: 'Player/MuteButton',
+  component: Player.MuteButton,
+  render: () => (
+    <Player.Viewport style={{ width: 480, height: 270, background: '#0b0e13' }}>
+      <Player.MuteButton />
+    </Player.Viewport>
+  )
+} satisfies Meta<typeof Player.MuteButton>;
+
+export default meta;
+
+type Story = StoryObj<typeof meta>;
+
+export const Unmuted: Story = {
+  parameters: ready({ setVolume: available }, { muted: false }),
+  play: async ({ canvas }) => {
+    const button = await canvas.findByRole('button', { name: 'Mute' });
+    await expect(button).toHaveAttribute('aria-pressed', 'false');
+    await expect(button).toHaveAttribute('data-state', 'unmuted');
+  }
+};
+
+export const Muted: Story = {
+  parameters: ready({ setVolume: available }, { muted: true }),
+  play: async ({ canvas }) => {
+    const button = await canvas.findByRole('button', { name: 'Unmute' });
+    await expect(button).toHaveAttribute('aria-pressed', 'true');
+  }
+};
+
+/** Focus behavior: keyboard reaches the button. */
+export const KeyboardFocusable: Story = {
+  parameters: ready({ setVolume: available }, { muted: false }),
+  play: async ({ canvas, userEvent }) => {
+    const button = await canvas.findByRole('button', { name: 'Mute' });
+    await userEvent.tab();
+    await expect(button).toHaveFocus();
+  }
+};
+
+/** Capability absent: an unresolved volume capability renders nothing. */
+export const CapabilityAbsent: Story = {
+  parameters: ready({ setVolume: notReady }),
+  play: async ({ canvas }) => {
+    await expect(canvas.queryByRole('button')).toBeNull();
+  }
+};

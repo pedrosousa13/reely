@@ -44,6 +44,15 @@ export type Availability =
 
 export type TimeRange = { readonly start: number; readonly end: number };
 
+// Normalized live status. `null` means the stream is not live or its liveness
+// is not yet known. Derived from provider/seekable data (infinite/unknown
+// duration, hls.js level info, a moving seekable window) — never from the
+// source URL or filename.
+export type PlayerLiveState = {
+  readonly isLive: boolean;
+  readonly atLiveEdge: boolean;
+} | null;
+
 export type PlayerProvider = 'native' | 'hls' | 'youtube' | 'vimeo';
 
 export type HlsEngine = 'native' | 'hls.js';
@@ -77,6 +86,7 @@ export type PlayerState = {
   readonly duration: number | null;
   readonly buffered: ReadonlyArray<TimeRange>;
   readonly seekable: ReadonlyArray<TimeRange>;
+  readonly live: PlayerLiveState;
   readonly muted: boolean;
   readonly volume: number;
   readonly playbackRate: number;
@@ -215,6 +225,7 @@ export type ProviderAdapter = {
   exitFullscreen?: () => Promise<CommandResult>;
   requestPictureInPicture?: () => Promise<CommandResult>;
   exitPictureInPicture?: () => Promise<CommandResult>;
+  showAirPlayPicker?: () => Promise<CommandResult>;
   retry?: () => Promise<CommandResult>;
 };
 
@@ -268,6 +279,7 @@ export const createInitialPlayerState = (): PlayerState =>
     duration: null,
     buffered: Object.freeze([]),
     seekable: Object.freeze([]),
+    live: null,
     muted: false,
     volume: 1,
     playbackRate: 1,
@@ -782,6 +794,8 @@ export class PlayerController {
     this.#command('requestPictureInPicture');
   exitPictureInPicture = (): Promise<CommandResult> =>
     this.#command('exitPictureInPicture');
+  showAirPlayPicker = (): Promise<CommandResult> =>
+    this.#command('showAirPlayPicker');
   retry = (): Promise<CommandResult> => {
     const provider = this.#provider;
     if (!provider?.retry) return this.#command('retry');
@@ -837,6 +851,7 @@ export class PlayerController {
       | 'exitFullscreen'
       | 'requestPictureInPicture'
       | 'exitPictureInPicture'
+      | 'showAirPlayPicker'
       | 'retry'
     >,
     value?: number | string | null
@@ -864,6 +879,7 @@ export class PlayerController {
       | 'exitFullscreen'
       | 'requestPictureInPicture'
       | 'exitPictureInPicture'
+      | 'showAirPlayPicker'
       | 'retry'
     >,
     value?: number | string | null
@@ -1115,3 +1131,272 @@ export class PlayerController {
     });
   };
 }
+
+// Media Session ownership arbitration.
+//
+// The Media Session API exposes exactly ONE `navigator.mediaSession` per
+// document. When a page hosts several Reely roots they must share that single
+// surface, so a coordinator arbitrates it: the most-recently-*playing* root
+// owns the metadata and action handlers. A root releases ownership when another
+// root starts playing, on teardown, or on unmount — and it NEVER clears
+// handlers it does not currently own.
+//
+// This does NOT prevent simultaneous playback: two roots can play at once, and
+// only the lock-screen/hardware-key surface follows the most recent one.
+// Enforcing a single active player (exclusive playback groups) is a separate,
+// deferred concern.
+
+export type MediaSessionArtwork = {
+  readonly src: string;
+  readonly sizes?: string;
+  readonly type?: string;
+};
+
+// Explicit metadata supplied by the consumer. Reely never scrapes this from the
+// media source; a caller passes exactly what the lock screen should show.
+export type MediaMetadataInput = {
+  readonly title?: string;
+  readonly artist?: string;
+  readonly album?: string;
+  readonly artwork?: ReadonlyArray<MediaSessionArtwork>;
+};
+
+export type MediaSessionPositionState = {
+  readonly duration?: number;
+  readonly position?: number;
+  readonly playbackRate?: number;
+};
+
+type MediaSessionActionDetails = {
+  readonly seekTime?: number;
+  readonly seekOffset?: number;
+};
+
+type MediaSessionActionHandler =
+  ((details: MediaSessionActionDetails) => void) | null;
+
+// The subset of `navigator.mediaSession` the coordinator touches. Modeled as a
+// structural type so it can be driven by a real MediaSession or a fake in tests.
+export type MediaSessionLike = {
+  metadata: unknown;
+  playbackState?: string;
+  setActionHandler: (
+    action: string,
+    handler: MediaSessionActionHandler
+  ) => void;
+  setPositionState?: (state?: MediaSessionPositionState) => void;
+};
+
+export type MediaSessionActions = {
+  readonly play: () => void;
+  readonly pause: () => void;
+  readonly seekTo: (time: number) => void;
+  readonly seekBy: (offset: number) => void;
+};
+
+export type MediaSessionRootConfig = {
+  readonly actions: MediaSessionActions;
+  readonly metadata?: MediaMetadataInput | null;
+};
+
+export type MediaSessionRoot = {
+  // Claim ownership and mark the shared surface as playing.
+  readonly notifyPlaying: () => void;
+  // Mark the shared surface as paused, keeping ownership.
+  readonly notifyPaused: () => void;
+  // Replace this root's metadata; writes through only while it owns the surface.
+  readonly setMetadata: (metadata: MediaMetadataInput | null) => void;
+  // Report scrubber position; writes through only while it owns the surface.
+  readonly setPositionState: (state: MediaSessionPositionState | null) => void;
+  // Release ownership (teardown / unmount / source change). Clears the shared
+  // surface only if this root currently owns it.
+  readonly release: () => void;
+};
+
+export type MediaSessionCoordinator = {
+  readonly register: (config: MediaSessionRootConfig) => MediaSessionRoot;
+  // Current owner, exposed for inspection and tests.
+  readonly owner: () => MediaSessionRoot | null;
+};
+
+export type MediaSessionBinding = {
+  readonly setMetadata: (metadata: MediaMetadataInput | null) => void;
+  readonly release: () => void;
+};
+
+const DEFAULT_SEEK_OFFSET = 10;
+
+const MEDIA_SESSION_ACTIONS = [
+  'play',
+  'pause',
+  'seekto',
+  'seekforward',
+  'seekbackward'
+] as const;
+
+type MetadataFactory = (metadata: MediaMetadataInput) => unknown;
+
+const globalMediaMetadata = ():
+  (new (init: MediaMetadataInput) => unknown) | undefined => {
+  const scope = globalThis as {
+    MediaMetadata?: new (init: MediaMetadataInput) => unknown;
+  };
+  return typeof scope.MediaMetadata === 'function'
+    ? scope.MediaMetadata
+    : undefined;
+};
+
+const defaultMetadataFactory: MetadataFactory = (metadata) => {
+  const Ctor = globalMediaMetadata();
+  const init = {
+    ...metadata,
+    artwork: metadata.artwork ? metadata.artwork.map((art) => ({ ...art })) : []
+  };
+  if (!Ctor) return init;
+  try {
+    return new Ctor(init);
+  } catch {
+    return init;
+  }
+};
+
+export const createMediaSessionCoordinator = (
+  session: MediaSessionLike,
+  options: { readonly metadataFactory?: MetadataFactory } = {}
+): MediaSessionCoordinator => {
+  const metadataFactory = options.metadataFactory ?? defaultMetadataFactory;
+  let owner: MediaSessionRoot | null = null;
+
+  const applyMetadata = (metadata: MediaMetadataInput | null): void => {
+    session.metadata = metadata ? metadataFactory(metadata) : null;
+  };
+
+  const clearSurface = (): void => {
+    for (const action of MEDIA_SESSION_ACTIONS) {
+      session.setActionHandler(action, null);
+    }
+    session.metadata = null;
+    session.playbackState = 'none';
+  };
+
+  const wireHandlers = (actions: MediaSessionActions): void => {
+    session.setActionHandler('play', () => actions.play());
+    session.setActionHandler('pause', () => actions.pause());
+    session.setActionHandler('seekto', (details) => {
+      if (typeof details.seekTime === 'number')
+        actions.seekTo(details.seekTime);
+    });
+    session.setActionHandler('seekforward', (details) =>
+      actions.seekBy(details.seekOffset ?? DEFAULT_SEEK_OFFSET)
+    );
+    session.setActionHandler('seekbackward', (details) =>
+      actions.seekBy(-(details.seekOffset ?? DEFAULT_SEEK_OFFSET))
+    );
+  };
+
+  const register = (config: MediaSessionRootConfig): MediaSessionRoot => {
+    let metadata = config.metadata ?? null;
+    let released = false;
+    const owns = (): boolean => owner === root && !released;
+
+    const root: MediaSessionRoot = {
+      notifyPlaying: () => {
+        if (released) return;
+        owner = root;
+        wireHandlers(config.actions);
+        applyMetadata(metadata);
+        session.playbackState = 'playing';
+      },
+      notifyPaused: () => {
+        if (!owns()) return;
+        session.playbackState = 'paused';
+      },
+      setMetadata: (next) => {
+        metadata = next;
+        if (owns()) applyMetadata(next);
+      },
+      setPositionState: (state) => {
+        if (!owns() || typeof session.setPositionState !== 'function') return;
+        session.setPositionState(state ?? undefined);
+      },
+      release: () => {
+        if (released) return;
+        released = true;
+        // Only clear the shared surface if this root is the current owner;
+        // releasing a root that already lost ownership must not disturb the
+        // new owner's handlers.
+        if (owner === root) {
+          clearSurface();
+          owner = null;
+        }
+      }
+    };
+    return root;
+  };
+
+  return {
+    register,
+    owner: () => owner
+  };
+};
+
+// One coordinator per document, keyed by the MediaSession object identity. This
+// is what enforces the "single navigator.mediaSession per document" rule when
+// several roots resolve the coordinator independently.
+const coordinators = new WeakMap<MediaSessionLike, MediaSessionCoordinator>();
+
+export const getMediaSessionCoordinator = (
+  session: MediaSessionLike
+): MediaSessionCoordinator => {
+  const existing = coordinators.get(session);
+  if (existing) return existing;
+  const created = createMediaSessionCoordinator(session);
+  coordinators.set(session, created);
+  return created;
+};
+
+// Binds a controller's confirmed playback to a coordinator root: the root
+// claims ownership when the controller starts playing, keeps ownership while
+// paused, and routes lock-screen actions back to the controller. React calls
+// `release()` from its effect cleanup, so a source change or unmount tears the
+// binding down (and clears the surface only when this root still owns it).
+export const bindMediaSession = (
+  controller: PlayerController,
+  coordinator: MediaSessionCoordinator,
+  options: { readonly metadata?: MediaMetadataInput | null } = {}
+): MediaSessionBinding => {
+  const root = coordinator.register({
+    metadata: options.metadata ?? null,
+    actions: {
+      play: () => void controller.play(),
+      pause: () => void controller.pause(),
+      seekTo: (time) => void controller.seekTo(time),
+      seekBy: (offset) => void controller.seekBy(offset)
+    }
+  });
+
+  let lastPlayback: PlaybackState | undefined;
+
+  const unsubscribe = controller.subscribe((state) => {
+    if (state.playback !== lastPlayback) {
+      lastPlayback = state.playback;
+      if (state.playback === 'playing') root.notifyPlaying();
+      else root.notifyPaused();
+    }
+    if (state.duration !== null && Number.isFinite(state.duration)) {
+      root.setPositionState({
+        duration: state.duration,
+        position: state.currentTime,
+        playbackRate: state.playbackRate
+      });
+    }
+  });
+
+  return {
+    setMetadata: (metadata) => root.setMetadata(metadata),
+    release: () => {
+      unsubscribe();
+      root.release();
+    }
+  };
+};
