@@ -1,5 +1,6 @@
 import { expect, test, type Locator, type Page } from '@playwright/test';
-import { spawnSync } from 'node:child_process';
+import { readdirSync, readFileSync } from 'node:fs';
+import { extname, join } from 'node:path';
 
 type Rectangle = {
   x: number;
@@ -18,6 +19,29 @@ const poster = (page: Page) => page.locator('[data-reely-part="poster"]');
 const viewport = (page: Page) => page.locator('[data-reely-part="viewport"]');
 const posterImage = (page: Page) =>
   page.locator('[data-reely-part="poster-image"]');
+
+const visualSourceExtensions = new Set(['.css', '.js', '.jsx', '.ts', '.tsx']);
+const ignoredSourceDirectories = new Set([
+  '.next',
+  'coverage',
+  'dist',
+  'node_modules',
+  'test'
+]);
+const visualSourceFiles = (directory: string): string[] =>
+  readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
+    const path = join(directory, entry.name);
+    if (entry.isDirectory()) {
+      return entry.name.startsWith('.') ||
+        ignoredSourceDirectories.has(entry.name)
+        ? []
+        : visualSourceFiles(path);
+    }
+    return visualSourceExtensions.has(extname(entry.name)) &&
+      !entry.name.includes('.test.')
+      ? [path]
+      : [];
+  });
 
 const expectMatchingRectangles = async (page: Page) => {
   await expect(poster(page)).toHaveCount(1);
@@ -119,22 +143,9 @@ test('hides the poster after the first frame without changing its geometry', asy
 });
 
 test('visual source files do not declare background images', () => {
-  const result = spawnSync(
-    'rg',
-    [
-      '-n',
-      '--glob',
-      '*.{css,ts,tsx,js,jsx}',
-      '--glob',
-      '!**/test/**',
-      '--glob',
-      '!**/*.test.*',
-      'background-image|backgroundImage',
-      'apps',
-      'packages'
-    ],
-    { cwd: process.cwd(), encoding: 'utf8' }
-  );
-
-  expect(result.status, result.stdout || result.stderr).toBe(1);
+  for (const file of ['apps', 'packages'].flatMap(visualSourceFiles)) {
+    expect(readFileSync(file, 'utf8'), file).not.toMatch(
+      /background-image|backgroundImage/
+    );
+  }
 });
