@@ -19,13 +19,17 @@ const manifest = JSON.parse(
 const entryKey = Object.keys(manifest).find((key) => manifest[key].isEntry);
 if (!entryKey) throw new Error('The Vite manifest has no entry.');
 
-const staticKeys = new Set();
-const visitStatic = (key) => {
-  if (staticKeys.has(key)) return;
-  staticKeys.add(key);
-  for (const imported of manifest[key]?.imports ?? []) visitStatic(imported);
+const staticClosure = (rootKey) => {
+  const closure = new Set();
+  const visit = (key) => {
+    if (closure.has(key)) return;
+    closure.add(key);
+    for (const imported of manifest[key]?.imports ?? []) visit(imported);
+  };
+  visit(rootKey);
+  return closure;
 };
-visitStatic(entryKey);
+const staticKeys = staticClosure(entryKey);
 
 const isProviderEntry = (key) => {
   const name = manifest[key]?.name ?? '';
@@ -45,6 +49,33 @@ if (!nativeProviderKey) {
 for (const key of providerKeys) {
   if (staticKeys.has(key)) {
     throw new Error(`Provider adapter leaked into the initial graph: ${key}`);
+  }
+}
+
+const hlsLibraryKeys = Object.keys(manifest).filter(
+  (key) =>
+    /node_modules\/.*hls\.js\//.test(key) || manifest[key]?.name === 'hls'
+);
+if (hlsLibraryKeys.length === 0) {
+  throw new Error('The consumer build did not emit an hls.js chunk.');
+}
+const hlsProviderKey = providerKeys.find((key) => {
+  const name = manifest[key]?.name ?? '';
+  return key.includes('provider-hls') || name.includes('provider-hls');
+});
+if (!hlsProviderKey) {
+  throw new Error('The consumer build did not emit an HLS provider chunk.');
+}
+// The native MP4 initial graph and the native-HLS initial graph (the HLS
+// provider chunk on the native engine) must both reach hls.js only through a
+// dynamic import.
+const nativeHlsKeys = staticClosure(hlsProviderKey);
+for (const key of hlsLibraryKeys) {
+  if (staticKeys.has(key)) {
+    throw new Error(`hls.js leaked into the native MP4 initial graph: ${key}`);
+  }
+  if (nativeHlsKeys.has(key)) {
+    throw new Error(`hls.js leaked into the native-HLS initial graph: ${key}`);
   }
 }
 
