@@ -1,4 +1,11 @@
-import { afterEach, expect } from 'vitest';
+import { afterEach, beforeAll, expect } from 'vitest';
+
+beforeAll(() => {
+  // Browsers cap the resource-timing buffer (~250 entries); module fetches
+  // accumulate across a file's tests and, once full, later external
+  // requests go unrecorded — the guard below would pass vacuously.
+  performance.setResourceTimingBufferSize(10_000);
+});
 
 afterEach(() => {
   const resources = performance.getEntriesByType(
@@ -16,4 +23,6 @@ afterEach(() => {
     name.includes('/media/sample.mp4')
   );
   expect(mediaRequests).toEqual([]);
+  // Clear so each test is checked against only its own entries.
+  performance.clearResourceTimings();
 });

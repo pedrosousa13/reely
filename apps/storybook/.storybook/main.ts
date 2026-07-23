@@ -25,6 +25,10 @@ const config: StorybookConfig = {
             // and leave the leading "./" from the original specifier in
             // place, producing an invalid path. Anchoring makes the whole
             // specifier get replaced with the absolute mock module path.
+            // This pattern also assumes the importer sits directly in
+            // packages/react/src — a `../provider-loaders` import from a
+            // future subdirectory would bypass the mock, and the
+            // pending/reject stories would then fail loudly.
             find: /^\.\/provider-loaders(\.ts)?$/,
             replacement: fileURLToPath(
               new URL('../src/mock-provider-loader.ts', import.meta.url)

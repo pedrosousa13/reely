@@ -30,6 +30,10 @@ Component workbench and story-based test runner for `@reely/react`.
   the Vitest addon builds its own Vite server and never goes through the
   dev-server bootstrap. The path string is duplicated across stories, the
   plugin, and the middleware; keep all three in sync if it ever changes.
+  The `/media/sample.mp4` assertion only covers the decorator's default
+  source — a story overriding `rootProps.source` with a different
+  same-origin path is only caught by the external-origin check, so keep
+  story sources on the default unless there's a reason not to.
 - **Give headless states visible chrome.** Stories set a shared
   `viewportStyle` (`border: '1px dashed #94a3b8'`, `background: '#f1f5f9'`)
   on `Player.Viewport` so unstyled states are visible in the workbench.
