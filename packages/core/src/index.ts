@@ -1,3 +1,5 @@
+export * from './media-session';
+
 export type PlaybackState = 'paused' | 'playing' | 'ended';
 
 export type CommandFailureReason =
@@ -215,6 +217,7 @@ export type ProviderAdapter = {
   exitFullscreen?: () => Promise<CommandResult>;
   requestPictureInPicture?: () => Promise<CommandResult>;
   exitPictureInPicture?: () => Promise<CommandResult>;
+  showAirPlayPicker?: () => Promise<CommandResult>;
   retry?: () => Promise<CommandResult>;
 };
 
@@ -782,6 +785,8 @@ export class PlayerController {
     this.#command('requestPictureInPicture');
   exitPictureInPicture = (): Promise<CommandResult> =>
     this.#command('exitPictureInPicture');
+  showAirPlayPicker = (): Promise<CommandResult> =>
+    this.#command('showAirPlayPicker');
   retry = (): Promise<CommandResult> => {
     const provider = this.#provider;
     if (!provider?.retry) return this.#command('retry');
@@ -837,6 +842,7 @@ export class PlayerController {
       | 'exitFullscreen'
       | 'requestPictureInPicture'
       | 'exitPictureInPicture'
+      | 'showAirPlayPicker'
       | 'retry'
     >,
     value?: number | string | null
@@ -864,6 +870,7 @@ export class PlayerController {
       | 'exitFullscreen'
       | 'requestPictureInPicture'
       | 'exitPictureInPicture'
+      | 'showAirPlayPicker'
       | 'retry'
     >,
     value?: number | string | null
