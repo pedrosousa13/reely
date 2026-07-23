@@ -267,7 +267,9 @@ test('emits confirmed ready state from the embedded player', async () => {
     setVolume: { status: 'available' },
     selectTextTrack: { status: 'available' },
     fullscreen: { status: 'available' },
-    customControls: { status: 'available' }
+    customControls: { status: 'available' },
+    selectQuality: { status: 'unavailable', reason: 'provider' },
+    airPlay: { status: 'unavailable', reason: 'provider' }
   });
 });
 
@@ -306,6 +308,14 @@ test('resolves the plan for unlisted videos through the hashed watch URL', async
 
 test('keeps chromeless capability unknown when the plan cannot be resolved', async () => {
   fetchMock.mockRejectedValue(new Error('offline'));
+  const { patches } = await setup();
+  expect(readyPatch(patches).capabilities).toMatchObject({
+    customControls: { status: 'unknown', reason: 'provider-check' }
+  });
+});
+
+test('keeps chromeless capability unknown for unrecognized account tiers', async () => {
+  fetchMock.mockResolvedValue(oembedResponse('future_tier'));
   const { patches } = await setup();
   expect(readyPatch(patches).capabilities).toMatchObject({
     customControls: { status: 'unknown', reason: 'provider-check' }

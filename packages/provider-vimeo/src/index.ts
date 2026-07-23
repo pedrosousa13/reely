@@ -160,6 +160,21 @@ const vimeoEmbedUrl = (
 
 const planLimitedAccountTypes = new Set(['free', 'basic']);
 
+// Tiers verified against the live oEmbed API plus Vimeo's documented paid
+// lineups (legacy and 2023 rename). Unknown future tiers stay unresolved so a
+// gated tier is never misreported as chromeless-capable.
+const chromelessAccountTypes = new Set([
+  'plus',
+  'pro',
+  'business',
+  'premium',
+  'enterprise',
+  'custom',
+  'starter',
+  'standard',
+  'advanced'
+]);
+
 const chromelessAvailability = async (
   source: VimeoSource
 ): Promise<Availability> => {
@@ -179,9 +194,10 @@ const chromelessAvailability = async (
         ? data.account_type
         : undefined;
     if (!accountType) return providerCheck;
-    return planLimitedAccountTypes.has(accountType)
-      ? { status: 'unavailable', reason: 'provider-plan' }
-      : available;
+    if (planLimitedAccountTypes.has(accountType)) {
+      return { status: 'unavailable', reason: 'provider-plan' };
+    }
+    return chromelessAccountTypes.has(accountType) ? available : providerCheck;
   } catch {
     return providerCheck;
   }
@@ -259,11 +275,14 @@ export const createVimeoProvider = (
     seek: available,
     setVolume: volumeAvailability,
     setPlaybackRate: playbackRateAvailability,
-    selectQuality: providerCheck,
+    // The SDK exposes quality and remote-playback methods, but this adapter
+    // wires no command surface for them yet, so they are unavailable through
+    // Reely rather than forever "unknown".
+    selectQuality: { status: 'unavailable', reason: 'provider' },
     selectTextTrack: textTrackAvailability,
     fullscreen: available,
     pictureInPicture: pictureInPictureAvailability,
-    airPlay: providerCheck,
+    airPlay: { status: 'unavailable', reason: 'provider' },
     customControls: customControlsAvailability
   });
 
