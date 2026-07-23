@@ -107,6 +107,25 @@ test('reports WebKit fullscreen as unavailable once metadata rules it out', asyn
   });
 });
 
+test('prefers the standard fullscreen exit over lingering WebKit legacy state', async () => {
+  const { media, ownerDocument } = createOwnedVideo();
+  const exitFullscreen = vi.fn().mockResolvedValue(undefined);
+  const webkitExitFullscreen = vi.fn();
+  define(media, 'requestFullscreen', vi.fn().mockResolvedValue(undefined));
+  define(ownerDocument, 'exitFullscreen', exitFullscreen);
+  define(ownerDocument, 'fullscreenElement', media);
+  // Blink also exposes the legacy WebKit video fullscreen surface, and it
+  // reports webkitDisplayingFullscreen after a standard requestFullscreen.
+  define(media, 'webkitDisplayingFullscreen', true);
+  define(media, 'webkitExitFullscreen', webkitExitFullscreen);
+  const provider = createNativeProvider(media);
+
+  await expect(provider.exitFullscreen()).resolves.toEqual({ ok: true });
+
+  expect(exitFullscreen).toHaveBeenCalledOnce();
+  expect(webkitExitFullscreen).not.toHaveBeenCalled();
+});
+
 test('reports policy-disallowed fullscreen and returns a typed blocked result', async () => {
   const { media, ownerDocument } = createOwnedVideo();
   const requestFullscreen = vi.fn().mockResolvedValue(undefined);

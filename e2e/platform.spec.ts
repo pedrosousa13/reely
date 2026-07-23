@@ -113,7 +113,8 @@ test('platform fullscreen commands confirm state through fullscreenchange', asyn
   await page.goto('/', { waitUntil: 'domcontentloaded' });
   await awaitCapabilityResolution(page);
 
-  await page.getByTestId('fullscreen-toggle').click();
+  const toggle = page.getByTestId('fullscreen-toggle');
+  await toggle.click();
   await expect
     .poll(() => page.evaluate(() => document.fullscreenElement !== null))
     .toBe(true);
@@ -122,7 +123,11 @@ test('platform fullscreen commands confirm state through fullscreenchange', asyn
     'active'
   );
 
-  await page.evaluate(() => document.exitFullscreen());
+  // Exit through the provider's own exit command. The fullscreen media
+  // element sits in the top layer above the toggle, so dispatch the click
+  // directly instead of through a pointer; exiting needs no user gesture.
+  await expect(toggle).toHaveText('Exit fullscreen');
+  await toggle.evaluate((element) => (element as HTMLButtonElement).click());
   await expect
     .poll(() => page.evaluate(() => document.fullscreenElement === null))
     .toBe(true);

@@ -469,6 +469,9 @@ export const createNativeProvider = (
       event('fullscreenchange', originalEvent, { fullscreen })
     );
   };
+  // Only picture-in-picture state is derived here; fullscreen presentation
+  // mode transitions rely on webkitbeginfullscreen/webkitendfullscreen,
+  // which Safari fires alongside this event.
   const onWebKitPresentationModeChange = (originalEvent: Event): void => {
     const pictureInPicture =
       webkitMedia.webkitPresentationMode === 'picture-in-picture';
@@ -660,16 +663,21 @@ export const createNativeProvider = (
       return runCommand(() => enterWebKitFullscreen.call(media));
     },
     exitFullscreen: async () => {
+      // Standard fullscreen first: Blink still ships the legacy WebKit video
+      // fullscreen properties, so webkitDisplayingFullscreen is also true
+      // after a standard requestFullscreen there.
+      if (ownerDocument.fullscreenElement === media) {
+        if (!ownerDocument.exitFullscreen)
+          return { ok: false, reason: 'unsupported' };
+        return runCommand(() => ownerDocument.exitFullscreen());
+      }
       if (webkitMedia.webkitDisplayingFullscreen === true) {
         const exitWebKitFullscreen = webkitMedia.webkitExitFullscreen;
         if (typeof exitWebKitFullscreen !== 'function')
           return { ok: false, reason: 'unsupported' };
         return runCommand(() => exitWebKitFullscreen.call(media));
       }
-      if (ownerDocument.fullscreenElement !== media) return { ok: true };
-      if (!ownerDocument.exitFullscreen)
-        return { ok: false, reason: 'unsupported' };
-      return runCommand(() => ownerDocument.exitFullscreen());
+      return { ok: true };
     },
     requestPictureInPicture: async () => {
       if (media.disablePictureInPicture === true) {
