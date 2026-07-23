@@ -263,6 +263,48 @@ test('selects renditions by height and returns to automatic adaptation', async (
     ok: false,
     reason: 'unsupported'
   });
+  await expect(provider.selectQuality?.(Number.NaN)).resolves.toEqual({
+    ok: false,
+    reason: 'unsupported'
+  });
+});
+
+test('downgrades quality selection on recovery exhaustion and restores it after retry', async () => {
+  const { patches, provider } = createHarness(stubMseOnlySupport);
+  await provider.attach();
+  await provider.load();
+  const first = currentFakeHls();
+  first.levels = [{ height: 180 }, { height: 90 }];
+  first.emit(FakeHls.Events.MANIFEST_PARSED, { levels: first.levels });
+  expect(patches.at(-1)).toMatchObject({
+    capabilities: { selectQuality: { status: 'available' } }
+  });
+
+  first.emitFatalError(FakeHls.ErrorTypes.NETWORK_ERROR);
+  first.emitFatalError(FakeHls.ErrorTypes.NETWORK_ERROR);
+  first.emitFatalError(FakeHls.ErrorTypes.NETWORK_ERROR);
+
+  expect(patches.at(-1)).toMatchObject({
+    lifecycle: 'error',
+    capabilities: {
+      selectQuality: { status: 'unavailable', reason: 'provider' }
+    }
+  });
+  await expect(provider.selectQuality?.(90)).resolves.toEqual({
+    ok: false,
+    reason: 'not-ready'
+  });
+
+  await expect(provider.retry?.()).resolves.toEqual({ ok: true });
+  const second = currentFakeHls();
+  second.levels = [{ height: 180 }, { height: 90 }];
+  second.emit(FakeHls.Events.MANIFEST_PARSED, { levels: second.levels });
+
+  expect(patches.at(-1)).toMatchObject({
+    capabilities: { selectQuality: { status: 'available' } }
+  });
+  await expect(provider.selectQuality?.(90)).resolves.toEqual({ ok: true });
+  expect(second.currentLevel).toBe(1);
 });
 
 test('bounds fatal network recovery and surfaces a normalized error', async () => {
@@ -310,12 +352,15 @@ test('bounds fatal media recovery and surfaces a normalized decode error', async
   const hls = currentFakeHls();
 
   hls.emitFatalError(FakeHls.ErrorTypes.MEDIA_ERROR);
+  expect(hls.swapAudioCodecCalls).toBe(0);
   hls.emitFatalError(FakeHls.ErrorTypes.MEDIA_ERROR);
   expect(hls.recoverMediaErrorCalls).toBe(2);
+  expect(hls.swapAudioCodecCalls).toBe(1);
 
   hls.emitFatalError(FakeHls.ErrorTypes.MEDIA_ERROR);
 
   expect(hls.recoverMediaErrorCalls).toBe(2);
+  expect(hls.swapAudioCodecCalls).toBe(1);
   expect(hls.destroyed).toBe(true);
   expect(patches.at(-1)).toMatchObject({
     lifecycle: 'error',

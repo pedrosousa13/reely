@@ -1,4 +1,5 @@
 import type {
+  Availability,
   CommandResult,
   HlsEngine,
   HlsSource,
@@ -35,6 +36,7 @@ export type HlsInstanceLike = {
   on: (event: string, listener: (event: string, data: unknown) => void) => void;
   startLoad: () => void;
   recoverMediaError: () => void;
+  swapAudioCodec: () => void;
   attachMedia: (media: HTMLMediaElement) => void;
   loadSource: (url: string) => void;
   destroy: () => void;
@@ -159,7 +161,10 @@ export const createHlsProvider = (
   let generation = 0;
   let networkRecoveries = 0;
   let mediaRecoveries = 0;
-  let qualitySelectable = false;
+  let selectQualityAvailability: Availability = {
+    status: 'unknown',
+    reason: 'provider-check'
+  };
   let lastCapabilities: PlayerCapabilities | undefined;
 
   const emit = (patch: ProviderStatePatch, event?: ProviderEvent): void => {
@@ -174,9 +179,7 @@ export const createHlsProvider = (
     selectQuality:
       engine === 'native'
         ? { status: 'unavailable', reason: 'provider' }
-        : qualitySelectable
-          ? { status: 'available' }
-          : { status: 'unknown', reason: 'provider-check' }
+        : selectQualityAvailability
   });
 
   const unsubscribeNative = native.subscribe((patch, event) => {
@@ -210,6 +213,7 @@ export const createHlsProvider = (
 
   const surfaceFatal = (error: PlayerError): void => {
     teardownHls();
+    selectQualityAvailability = { status: 'unavailable', reason: 'provider' };
     emit(
       {
         lifecycle: 'error',
@@ -218,6 +222,9 @@ export const createHlsProvider = (
         buffering: false,
         seeking: false,
         quality: null,
+        ...(lastCapabilities
+          ? { capabilities: withQualityCapability(lastCapabilities) }
+          : {}),
         error
       },
       { type: 'error', detail: error, origin: 'provider' }
@@ -254,6 +261,9 @@ export const createHlsProvider = (
     if (errorData.type === Hls.ErrorTypes.MEDIA_ERROR) {
       if (mediaRecoveries < MAX_FATAL_MEDIA_RECOVERIES) {
         mediaRecoveries += 1;
+        // Per the hls.js recovery contract, a repeated fatal media error
+        // needs an audio codec swap before the next recovery attempt.
+        if (mediaRecoveries > 1) instance.swapAudioCodec();
         instance.recoverMediaError();
         return;
       }
@@ -333,7 +343,7 @@ export const createHlsProvider = (
     });
     instance.on(HlsRuntime.Events.MANIFEST_PARSED, () => {
       if (destroyed || hls !== instance) return;
-      qualitySelectable = true;
+      selectQualityAvailability = { status: 'available' };
       if (lastCapabilities) {
         emit({ capabilities: withQualityCapability(lastCapabilities) });
       }
@@ -410,7 +420,10 @@ export const createHlsProvider = (
       if (engine === 'native') return native.retry();
       networkRecoveries = 0;
       mediaRecoveries = 0;
-      qualitySelectable = false;
+      selectQualityAvailability = {
+        status: 'unknown',
+        reason: 'provider-check'
+      };
       teardownHls();
       return startHlsJs();
     },
@@ -426,9 +439,6 @@ export const createHlsProvider = (
             if (height === null) {
               instance.currentLevel = -1;
               return { ok: true };
-            }
-            if (!Number.isFinite(height)) {
-              return { ok: false, reason: 'provider-error' };
             }
             const index = instance.levels.findIndex(
               (level) => level.height === height

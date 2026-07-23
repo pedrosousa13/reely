@@ -27,6 +27,7 @@ export class FakeHls implements HlsInstanceLike {
   loadedSource: string | undefined;
   startLoadCalls = 0;
   recoverMediaErrorCalls = 0;
+  swapAudioCodecCalls = 0;
   readonly #listeners = new Map<string, Set<FakeHlsListener>>();
 
   constructor() {
@@ -53,6 +54,10 @@ export class FakeHls implements HlsInstanceLike {
 
   recoverMediaError = (): void => {
     this.recoverMediaErrorCalls += 1;
+  };
+
+  swapAudioCodec = (): void => {
+    this.swapAudioCodecCalls += 1;
   };
 
   attachMedia = (media: HTMLMediaElement): void => {
