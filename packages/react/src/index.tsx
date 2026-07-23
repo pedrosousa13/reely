@@ -1,7 +1,12 @@
 import {
   PlayerController,
+  bindMediaSession,
   detectSource,
+  getMediaSessionCoordinator,
   type AutoplayMode,
+  type MediaMetadataInput,
+  type MediaSessionBinding,
+  type MediaSessionLike,
   type PlayerSource,
   type PlayerState
 } from '@reely/core';
@@ -104,6 +109,7 @@ export type PlayerHandle = Pick<
   | 'exitFullscreen'
   | 'requestPictureInPicture'
   | 'exitPictureInPicture'
+  | 'showAirPlayPicker'
   | 'retry'
 >;
 
@@ -126,6 +132,7 @@ export type RootProps = NativePlaybackOptions &
     readonly autoplay?: AutoplayMode;
     readonly children: ReactNode;
     readonly defaultMuted?: boolean;
+    readonly mediaMetadata?: MediaMetadataInput | null;
     readonly defaultPlaybackRate?: number;
     readonly defaultVolume?: number;
     readonly muted?: boolean;
@@ -262,6 +269,7 @@ export const usePlayerActions = (): PlayerActions => {
       exitFullscreen: controller.exitFullscreen,
       requestPictureInPicture: controller.requestPictureInPicture,
       exitPictureInPicture: controller.exitPictureInPicture,
+      showAirPlayPicker: controller.showAirPlayPicker,
       retry: controller.retry
     }),
     [controller]
@@ -278,6 +286,7 @@ export const Root = ({
   loadMargin = '200px 0px',
   loading = 'viewport',
   loop,
+  mediaMetadata,
   muted,
   onMutedChange,
   onPlaybackRateChange,
@@ -324,6 +333,10 @@ export const Root = ({
   const supersededVolume = useRef<Reconciliation<number>[]>([]);
   const supersededPlaybackRate = useRef<Reconciliation<number>[]>([]);
   const preferenceUnsubscribe = useRef<(() => void) | undefined>(undefined);
+  const mediaSessionBinding = useRef<MediaSessionBinding | undefined>(
+    undefined
+  );
+  const mediaMetadataSeed = useRef(mediaMetadata);
   const detectedSource = useMemo(() => detectSource(source), [source]);
   const sourceKeyForRender = sourceKey(detectedSource);
   const [sourceTransition, setSourceTransition] = useState<SourceTransition>(
@@ -341,6 +354,7 @@ export const Root = ({
   volumeChangeCallback.current = onVolumeChange;
   playbackRateChangeCallback.current = onPlaybackRateChange;
   autoplayConfiguration.current = { autoplay, muted };
+  mediaMetadataSeed.current = mediaMetadata;
   /* eslint-enable react-hooks/refs */
 
   useImperativeHandle(ref, () => controller, [controller]);
@@ -708,6 +722,34 @@ export const Root = ({
       reconcilePlaybackRate(playbackRate);
     }
   }, [controller, playbackRate, reconcilePlaybackRate]);
+
+  // Media Session: bind confirmed playback to the single, document-scoped
+  // coordinator. Re-runs on source change so the effect cleanup releases the
+  // previous binding (and clears the shared surface only if this root still
+  // owns it). Ownership follows the most-recently-playing root across roots.
+  useEffect(() => {
+    const mediaSession =
+      typeof navigator !== 'undefined'
+        ? // navigator.mediaSession is a DOM type; the coordinator is
+          // DOM-agnostic and keys on this object's identity.
+          (navigator.mediaSession as unknown as MediaSessionLike | undefined)
+        : undefined;
+    if (!mediaSession) return;
+    const binding = bindMediaSession(
+      controller,
+      getMediaSessionCoordinator(mediaSession),
+      { metadata: mediaMetadataSeed.current ?? null }
+    );
+    mediaSessionBinding.current = binding;
+    return () => {
+      binding.release();
+      mediaSessionBinding.current = undefined;
+    };
+  }, [controller, sourceKeyForRender]);
+
+  useEffect(() => {
+    mediaSessionBinding.current?.setMetadata(mediaMetadata ?? null);
+  }, [mediaMetadata]);
 
   const value = useMemo(
     () => ({
