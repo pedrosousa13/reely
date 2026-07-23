@@ -11,7 +11,8 @@ export default tseslint.config(
       'playwright-report/**',
       'test-results/**',
       '.superpowers/**',
-      'docs/superpowers/plans/**'
+      'docs/superpowers/plans/**',
+      'apps/storybook/storybook-static/**'
     ]
   },
   js.configs.recommended,

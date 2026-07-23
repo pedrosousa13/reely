@@ -5,6 +5,7 @@ packages:
   - tests/integrations/*
 allowBuilds:
   sharp@0.34.5: true
+  esbuild: false
 minimumReleaseAgeExclude:
   - '@vitejs/plugin-react@6.0.4'
   - react-dom@19.2.8

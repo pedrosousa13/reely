@@ -7,5 +7,6 @@
     "tsBuildInfoFile": "dist/.tsbuildinfo.test"
   },
   "references": [{ "path": "../core" }, { "path": "../provider-native" }],
-  "include": ["src", "test"]
+  "include": ["src", "test"],
+  "exclude": ["src/**/*.stories.tsx"]
 }

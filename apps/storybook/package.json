@@ -1,0 +1,26 @@
+{
+  "name": "@reely/storybook",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "storybook dev --port 6006",
+    "build": "storybook build",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.61.1",
+    "@reely/core": "workspace:*",
+    "@reely/provider-native": "workspace:*",
+    "@reely/react": "workspace:*",
+    "@storybook/addon-a11y": "10.5.3",
+    "@storybook/addon-vitest": "10.5.3",
+    "@storybook/react-vite": "10.5.3",
+    "@vitest/browser-playwright": "4.1.10",
+    "react": "19.2.8",
+    "react-dom": "19.2.8",
+    "storybook": "10.5.3",
+    "vite": "8.1.5",
+    "vitest": "4.1.10"
+  }
+}
