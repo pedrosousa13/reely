@@ -36,7 +36,6 @@ type PlayerContextValue = {
 
 type SourceTransition = {
   readonly key: string;
-  readonly epoch: number;
 };
 
 export type ViewportProps = ComponentPropsWithoutRef<'div'>;
@@ -273,9 +272,6 @@ export const Root = ({
   const [controller] = useState(() => new PlayerController());
   const [hiddenTransition, setHiddenTransition] = useState<SourceTransition>();
   const currentMedia = useRef<HTMLVideoElement | null>(null);
-  const currentSourceTransition = useRef<SourceTransition | undefined>(
-    undefined
-  );
   const providerSourceTransition = useRef<SourceTransition | undefined>(
     undefined
   );
@@ -317,20 +313,12 @@ export const Root = ({
   const preferenceUnsubscribe = useRef<(() => void) | undefined>(undefined);
   const detectedSource = useMemo(() => detectSource(source), [source]);
   const sourceKeyForRender = sourceKey(detectedSource);
-
-  /* eslint-disable react-hooks/refs -- Provider callbacks need the current source before passive effects run. */
-  let sourceTransitionForRender = currentSourceTransition.current;
-  if (
-    !sourceTransitionForRender ||
-    sourceTransitionForRender.key !== sourceKeyForRender
-  ) {
-    sourceTransitionForRender = {
-      key: sourceKeyForRender,
-      epoch: (sourceTransitionForRender?.epoch ?? 0) + 1
-    };
-    currentSourceTransition.current = sourceTransitionForRender;
+  const [sourceTransition, setSourceTransition] = useState<SourceTransition>(
+    () => ({ key: sourceKeyForRender })
+  );
+  if (sourceTransition.key !== sourceKeyForRender) {
+    setSourceTransition({ key: sourceKeyForRender });
   }
-  /* eslint-enable react-hooks/refs */
 
   /* eslint-disable react-hooks/refs -- Provider callbacks need the current props before passive effects run. */
   controlledMuted.current = muted;
@@ -491,6 +479,7 @@ export const Root = ({
         );
         loadedDataListener.current = undefined;
       }
+      providerSourceTransition.current = media ? sourceTransition : undefined;
       pendingMuted.current = undefined;
       pendingVolume.current = undefined;
       pendingPlaybackRate.current = undefined;
@@ -520,11 +509,11 @@ export const Root = ({
         controller.configureAutoplay(autoplayConfiguration.current.autoplay, {
           controlledMuted: autoplayConfiguration.current.muted
         });
-        const mediaSourceTransition = currentSourceTransition.current!;
+        const mediaSourceTransition = sourceTransition;
         const onLoadedData = () => {
           if (
             currentMedia.current === media &&
-            currentSourceTransition.current === mediaSourceTransition
+            providerSourceTransition.current === mediaSourceTransition
           ) {
             setHiddenTransition(mediaSourceTransition);
           }
@@ -537,14 +526,11 @@ export const Root = ({
       }
       const options = nativePlaybackOptions.current;
       appliedNativePlaybackOptions.current = media ? options : undefined;
-      providerSourceTransition.current = media
-        ? currentSourceTransition.current!
-        : undefined;
       controller.setProvider(
         media ? createNativeProvider(media, options) : undefined
       );
     },
-    [controller, ensurePreferenceSubscription]
+    [controller, ensurePreferenceSubscription, sourceTransition]
   );
 
   const registerMedia = useCallback(
@@ -669,10 +655,8 @@ export const Root = ({
     () => ({ controller, source: detectedSource, registerMedia }),
     [controller, detectedSource, registerMedia]
   );
-  /* eslint-disable react-hooks/refs -- sourceTransitionForRender is the synchronous transition snapshot above. */
   const posterState =
-    hiddenTransition === sourceTransitionForRender ? 'hidden' : 'visible';
-  /* eslint-enable react-hooks/refs */
+    hiddenTransition === sourceTransition ? 'hidden' : 'visible';
 
   return (
     <PlayerContext.Provider value={value}>

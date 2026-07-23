@@ -2,13 +2,14 @@
 
 import * as process from 'node:process';
 import {
+  act,
   cleanup,
   fireEvent,
   render,
   screen,
   waitFor
 } from '@testing-library/react';
-import { createRef, StrictMode } from 'react';
+import { createRef, startTransition, StrictMode, Suspense } from 'react';
 import type * as React from 'react';
 import { renderToString } from 'react-dom/server';
 import { afterEach, expect, test, vi } from 'vitest';
@@ -1293,6 +1294,50 @@ test('shows the poster synchronously for every A to B to A source transition', (
   rerender(player('/first.mp4'));
   expect(poster.getAttribute('data-state')).toBe('visible');
   fireEvent.loadedData(screen.getByLabelText('Reely media'));
+  expect(poster.getAttribute('data-state')).toBe('hidden');
+});
+
+test('keeps the committed poster lifecycle through an abandoned source render', async () => {
+  const suspendedForever = new Promise<never>(() => undefined);
+  let attemptedSecondSource = false;
+  const SuspendForSecondSource = ({ source }: { source: string }) => {
+    if (source === '/second.mp4') {
+      attemptedSecondSource = true;
+      throw suspendedForever;
+    }
+    return null;
+  };
+  const { Poster } = posterPrimitives;
+  const player = (source: string) => (
+    <Player.Root source={source}>
+      <Suspense fallback={<span>Suspended source</span>}>
+        <Player.Viewport>
+          <Player.Media />
+          <Poster>
+            <span>Concurrent poster</span>
+          </Poster>
+          <SuspendForSecondSource source={source} />
+        </Player.Viewport>
+      </Suspense>
+    </Player.Root>
+  );
+  const { rerender } = render(player('/first.mp4'));
+  const committedMedia = screen.getByLabelText<HTMLVideoElement>('Reely media');
+  const poster = screen.getByText('Concurrent poster').parentElement!;
+
+  await act(async () => {
+    startTransition(() => rerender(player('/second.mp4')));
+  });
+
+  expect(attemptedSecondSource).toBe(true);
+  expect(screen.queryByText('Suspended source')).toBeNull();
+  expect(screen.getByLabelText('Reely media')).toBe(committedMedia);
+  fireEvent.loadedData(committedMedia);
+  expect(poster.getAttribute('data-state')).toBe('hidden');
+
+  await act(async () => {
+    startTransition(() => rerender(player('/first.mp4')));
+  });
   expect(poster.getAttribute('data-state')).toBe('hidden');
 });
 
