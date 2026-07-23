@@ -1,9 +1,10 @@
 import { fileURLToPath, URL } from 'node:url';
 import react from '@vitejs/plugin-react';
 import { defineConfig } from 'vite';
+import { liveHlsFixture } from './live-playlist-plugin';
 
 export default defineConfig({
-  plugins: [react()],
+  plugins: [react(), liveHlsFixture()],
   resolve: {
     alias: {
       '@reely/core': fileURLToPath(
