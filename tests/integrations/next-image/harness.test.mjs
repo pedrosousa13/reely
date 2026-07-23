@@ -17,50 +17,38 @@ class FakeServer extends EventEmitter {
   }
 }
 
-test('accepts a bounded startup lifecycle seam', () => {
-  assert.equal(startNext.length, 2);
+test('terminates Next before rejecting a startup timeout', async () => {
+  const server = new FakeServer();
+
+  await assert.rejects(
+    startNext('fixture', { spawnProcess: () => server, startupTimeoutMs: 1 }),
+    /Timed out waiting for next start/
+  );
+
+  assert.deepEqual(server.signals, ['SIGTERM']);
+  assert.equal(server.listenerCount('error'), 0);
+  assert.equal(server.listenerCount('exit'), 0);
+  assert.equal(server.stdout.listenerCount('data'), 0);
+  assert.equal(server.stderr.listenerCount('data'), 0);
 });
 
-test(
-  'terminates Next before rejecting a startup timeout',
-  { skip: startNext.length < 2 },
-  async () => {
-    const server = new FakeServer();
+test('rejects the original spawn error after lifecycle cleanup', async () => {
+  const server = new FakeServer();
+  const spawnFailure = new Error('spawn failed');
+  const startup = startNext('fixture', {
+    spawnProcess: () => server,
+    startupTimeoutMs: 1_000
+  });
 
-    await assert.rejects(
-      startNext('fixture', { spawnProcess: () => server, startupTimeoutMs: 1 }),
-      /Timed out waiting for next start/
-    );
+  server.emit('error', spawnFailure);
 
-    assert.deepEqual(server.signals, ['SIGTERM']);
-    assert.equal(server.listenerCount('error'), 0);
-    assert.equal(server.listenerCount('exit'), 0);
-    assert.equal(server.stdout.listenerCount('data'), 0);
-    assert.equal(server.stderr.listenerCount('data'), 0);
-  }
-);
-
-test(
-  'rejects the original spawn error after lifecycle cleanup',
-  { skip: startNext.length < 2 },
-  async () => {
-    const server = new FakeServer();
-    const spawnFailure = new Error('spawn failed');
-    const startup = startNext('fixture', {
-      spawnProcess: () => server,
-      startupTimeoutMs: 1_000
-    });
-
-    server.emit('error', spawnFailure);
-
-    await assert.rejects(startup, spawnFailure);
-    assert.deepEqual(server.signals, ['SIGTERM']);
-    assert.equal(server.listenerCount('error'), 0);
-    assert.equal(server.listenerCount('exit'), 0);
-    assert.equal(server.stdout.listenerCount('data'), 0);
-    assert.equal(server.stderr.listenerCount('data'), 0);
-  }
-);
+  await assert.rejects(startup, spawnFailure);
+  assert.deepEqual(server.signals, ['SIGTERM']);
+  assert.equal(server.listenerCount('error'), 0);
+  assert.equal(server.listenerCount('exit'), 0);
+  assert.equal(server.stdout.listenerCount('data'), 0);
+  assert.equal(server.stderr.listenerCount('data'), 0);
+});
 
 test('terminates Next after browser cleanup fails', async () => {
   const browserFailure = new Error('browser close failed');

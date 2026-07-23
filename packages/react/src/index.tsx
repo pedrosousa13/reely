@@ -34,6 +34,11 @@ type PlayerContextValue = {
   registerMedia: (media: HTMLVideoElement | null) => void;
 };
 
+type SourceTransition = {
+  readonly key: string;
+  readonly epoch: number;
+};
+
 export type ViewportProps = ComponentPropsWithoutRef<'div'>;
 
 export type PosterProps = ComponentPropsWithoutRef<'div'>;
@@ -266,10 +271,14 @@ export const Root = ({
   volume
 }: RootProps) => {
   const [controller] = useState(() => new PlayerController());
-  const [hiddenSourceKey, setHiddenSourceKey] = useState<string>();
+  const [hiddenTransition, setHiddenTransition] = useState<SourceTransition>();
   const currentMedia = useRef<HTMLVideoElement | null>(null);
-  const currentSourceKey = useRef<string | undefined>(undefined);
-  const providerSourceKey = useRef<string | undefined>(undefined);
+  const currentSourceTransition = useRef<SourceTransition | undefined>(
+    undefined
+  );
+  const providerSourceTransition = useRef<SourceTransition | undefined>(
+    undefined
+  );
   const loadedDataListener = useRef<
     { media: HTMLVideoElement; listener: () => void } | undefined
   >(undefined);
@@ -310,7 +319,17 @@ export const Root = ({
   const sourceKeyForRender = sourceKey(detectedSource);
 
   /* eslint-disable react-hooks/refs -- Provider callbacks need the current source before passive effects run. */
-  currentSourceKey.current = sourceKeyForRender;
+  let sourceTransitionForRender = currentSourceTransition.current;
+  if (
+    !sourceTransitionForRender ||
+    sourceTransitionForRender.key !== sourceKeyForRender
+  ) {
+    sourceTransitionForRender = {
+      key: sourceKeyForRender,
+      epoch: (sourceTransitionForRender?.epoch ?? 0) + 1
+    };
+    currentSourceTransition.current = sourceTransitionForRender;
+  }
   /* eslint-enable react-hooks/refs */
 
   /* eslint-disable react-hooks/refs -- Provider callbacks need the current props before passive effects run. */
@@ -501,21 +520,26 @@ export const Root = ({
         controller.configureAutoplay(autoplayConfiguration.current.autoplay, {
           controlledMuted: autoplayConfiguration.current.muted
         });
-        const mediaSourceKey = currentSourceKey.current!;
+        const mediaSourceTransition = currentSourceTransition.current!;
         const onLoadedData = () => {
           if (
             currentMedia.current === media &&
-            currentSourceKey.current === mediaSourceKey
+            currentSourceTransition.current === mediaSourceTransition
           ) {
-            setHiddenSourceKey(mediaSourceKey);
+            setHiddenTransition(mediaSourceTransition);
           }
         };
         media.addEventListener('loadeddata', onLoadedData);
         loadedDataListener.current = { media, listener: onLoadedData };
+        if (media.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA) {
+          onLoadedData();
+        }
       }
       const options = nativePlaybackOptions.current;
       appliedNativePlaybackOptions.current = media ? options : undefined;
-      providerSourceKey.current = media ? currentSourceKey.current! : undefined;
+      providerSourceTransition.current = media
+        ? currentSourceTransition.current!
+        : undefined;
       controller.setProvider(
         media ? createNativeProvider(media, options) : undefined
       );
@@ -539,8 +563,8 @@ export const Root = ({
   useEffect(() => {
     registerMedia(currentMedia.current);
     const unsubscribePoster = controller.subscribe((state) => {
-      if (state.playback === 'playing' && providerSourceKey.current) {
-        setHiddenSourceKey(providerSourceKey.current);
+      if (state.playback === 'playing' && providerSourceTransition.current) {
+        setHiddenTransition(providerSourceTransition.current);
       }
     });
     return () => {
@@ -645,8 +669,10 @@ export const Root = ({
     () => ({ controller, source: detectedSource, registerMedia }),
     [controller, detectedSource, registerMedia]
   );
+  /* eslint-disable react-hooks/refs -- sourceTransitionForRender is the synchronous transition snapshot above. */
   const posterState =
-    hiddenSourceKey === sourceKeyForRender ? 'hidden' : 'visible';
+    hiddenTransition === sourceTransitionForRender ? 'hidden' : 'visible';
+  /* eslint-enable react-hooks/refs */
 
   return (
     <PlayerContext.Provider value={value}>
@@ -713,6 +739,7 @@ export const Poster = ({ children, style, ...safeRest }: PosterProps) => {
         height: '100%',
         zIndex: 10,
         pointerEvents: 'none',
+        transform: 'none',
         visibility: posterState === 'hidden' ? 'hidden' : 'visible'
       }}
     >

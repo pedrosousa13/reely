@@ -1086,7 +1086,18 @@ test('renders opaque custom and native picture posters in the fixed decorative l
     <Player.Root source="/clip.mp4">
       <Player.Viewport data-viewport-marker style={{ color: 'red' }}>
         <Player.Media />
-        <Poster>
+        <Poster
+          style={{
+            position: 'fixed',
+            inset: 12,
+            width: 320,
+            height: 180,
+            zIndex: 999,
+            pointerEvents: 'auto',
+            visibility: 'collapse',
+            transform: 'translateX(100px)'
+          }}
+        >
           <CustomPoster marker={marker} />
           <picture data-native-picture>
             <source media="(min-width: 800px)" srcSet="/wide.jpg 2x" />
@@ -1118,7 +1129,8 @@ test('renders opaque custom and native picture posters in the fixed decorative l
     height: '100%',
     zIndex: '10',
     pointerEvents: 'none',
-    visibility: 'visible'
+    visibility: 'visible',
+    transform: 'none'
   });
   expect(poster?.getAttribute('style')).not.toContain('background-image');
   expect(picture?.outerHTML).toBe(
@@ -1255,6 +1267,57 @@ test('hides the poster only for confirmed playback or the current media frame', 
   expect(poster.getAttribute('data-state')).toBe('visible');
   fireEvent.loadedData(secondMedia);
   expect(poster.getAttribute('data-state')).toBe('hidden');
+});
+
+test('shows the poster synchronously for every A to B to A source transition', () => {
+  const { Poster } = posterPrimitives;
+  const player = (source: string) => (
+    <Player.Root source={source}>
+      <Player.Viewport>
+        <Player.Media />
+        <Poster>
+          <span>Transition poster</span>
+        </Poster>
+      </Player.Viewport>
+    </Player.Root>
+  );
+  const { rerender } = render(player('/first.mp4'));
+  const poster = screen.getByText('Transition poster').parentElement!;
+
+  fireEvent.loadedData(screen.getByLabelText('Reely media'));
+  expect(poster.getAttribute('data-state')).toBe('hidden');
+
+  rerender(player('/second.mp4'));
+  expect(poster.getAttribute('data-state')).toBe('visible');
+
+  rerender(player('/first.mp4'));
+  expect(poster.getAttribute('data-state')).toBe('visible');
+  fireEvent.loadedData(screen.getByLabelText('Reely media'));
+  expect(poster.getAttribute('data-state')).toBe('hidden');
+});
+
+test('hides the poster when attached media already has current data', () => {
+  Object.defineProperty(HTMLMediaElement, 'HAVE_CURRENT_DATA', {
+    configurable: true,
+    value: 2
+  });
+  vi.spyOn(HTMLMediaElement.prototype, 'readyState', 'get').mockReturnValue(2);
+  const { Poster } = posterPrimitives;
+
+  render(
+    <Player.Root source="/cached.mp4">
+      <Player.Viewport>
+        <Player.Media />
+        <Poster>
+          <span>Cached poster</span>
+        </Poster>
+      </Player.Viewport>
+    </Player.Root>
+  );
+
+  expect(
+    screen.getByText('Cached poster').parentElement?.getAttribute('data-state')
+  ).toBe('hidden');
 });
 
 test('keeps poster lifecycle listeners correct through StrictMode replay', () => {

@@ -1,4 +1,4 @@
-/* global URL, document, fetch, getComputedStyle */
+/* global URL, document, getComputedStyle */
 
 import assert from 'node:assert/strict';
 import { fileURLToPath } from 'node:url';
@@ -16,20 +16,40 @@ const equalRectangles = (actual, expected) => {
   }
 };
 
+const readPosterMarkup = (page) =>
+  page.locator('[data-reely-part="poster"]').evaluate((poster) => {
+    const image = poster.querySelector('img[alt=""]');
+    if (!image) throw new Error('Expected a poster image in the live DOM.');
+    return {
+      hydrated: document.documentElement.dataset.hydrated === 'true',
+      imageConnected: image.isConnected,
+      posterConnected: poster.isConnected,
+      position: getComputedStyle(image).position,
+      srcset: image.getAttribute('srcset'),
+      sizes: image.getAttribute('sizes'),
+      image: image.getBoundingClientRect().toJSON(),
+      poster: poster.getBoundingClientRect().toJSON()
+    };
+  });
+
 let browser;
 const { origin, server } = await startNext(fixtureDirectory);
 
 await runWithCleanup({
   run: async () => {
-    const response = await fetch(`${origin}/`);
-    const html = await response.text();
-    assert.match(html, /data-reely-part="poster"/);
-    assert.match(html, /srcset=/i);
-    assert.match(html, /sizes=/);
-
     browser = await chromium.launch();
     const page = await browser.newPage();
     const failures = [];
+    let scriptsReleased = false;
+    let resolveHeldScripts = () => {};
+    const heldScriptsReleased = new Promise((resolve) => {
+      resolveHeldScripts = resolve;
+    });
+    const releaseHeldScripts = () => {
+      if (scriptsReleased) return;
+      scriptsReleased = true;
+      resolveHeldScripts();
+    };
 
     await page.route('**/*', async (route) => {
       const url = new URL(route.request().url());
@@ -37,6 +57,12 @@ await runWithCleanup({
         failures.push(`External request: ${url.href}`);
         await route.abort();
         return;
+      }
+      if (
+        url.origin === origin &&
+        route.request().resourceType() === 'script'
+      ) {
+        await heldScriptsReleased;
       }
       await route.continue();
     });
@@ -48,29 +74,62 @@ await runWithCleanup({
       failures.push(`Page error: ${error.message}`)
     );
 
-    await page.goto(`${origin}/`, { waitUntil: 'networkidle' });
-    await page.waitForFunction(
-      () => document.documentElement.dataset.hydrated === 'true'
-    );
+    try {
+      const firstScriptRequest = page.waitForRequest(
+        (request) =>
+          new URL(request.url()).origin === origin &&
+          request.resourceType() === 'script',
+        { timeout: 10_000 }
+      );
+      await Promise.all([
+        firstScriptRequest,
+        page.goto(`${origin}/`, { waitUntil: 'commit' })
+      ]);
+      await page
+        .locator('[data-reely-part="poster"] img[alt=""]')
+        .waitFor({ state: 'attached', timeout: 10_000 });
 
-    const markup = await page
-      .locator('[data-reely-part="poster"] img[alt=""]')
-      .evaluate((image) => ({
-        position: getComputedStyle(image).position,
-        srcset: image.getAttribute('srcset'),
-        sizes: image.getAttribute('sizes'),
-        image: image.getBoundingClientRect().toJSON(),
-        poster: image
-          .closest('[data-reely-part="poster"]')
-          ?.getBoundingClientRect()
-          .toJSON()
-      }));
-    assert.equal(markup.position, 'absolute');
-    assert.ok(markup.srcset, 'Expected Next Image responsive srcset markup.');
-    assert.ok(markup.sizes, 'Expected Next Image sizes markup.');
-    assert.ok(markup.poster, 'Expected image to be inside Player.Poster.');
-    equalRectangles(markup.image, markup.poster);
-    assert.deepEqual(failures, []);
+      const beforeHydration = await readPosterMarkup(page);
+      assert.equal(beforeHydration.hydrated, false);
+      assert.equal(beforeHydration.posterConnected, true);
+      assert.equal(beforeHydration.imageConnected, true);
+      assert.equal(beforeHydration.position, 'absolute');
+      assert.ok(
+        beforeHydration.srcset,
+        'Expected pre-hydration Next Image responsive srcset markup.'
+      );
+      assert.ok(
+        beforeHydration.sizes,
+        'Expected pre-hydration Next Image sizes markup.'
+      );
+      equalRectangles(beforeHydration.image, beforeHydration.poster);
+
+      releaseHeldScripts();
+      await page.waitForFunction(
+        () => document.documentElement.dataset.hydrated === 'true'
+      );
+      await page.waitForLoadState('networkidle');
+
+      const afterHydration = await readPosterMarkup(page);
+      assert.equal(afterHydration.hydrated, true);
+      assert.equal(afterHydration.posterConnected, true);
+      assert.equal(afterHydration.imageConnected, true);
+      assert.equal(afterHydration.position, 'absolute');
+      assert.ok(
+        afterHydration.srcset,
+        'Expected post-hydration Next Image responsive srcset markup.'
+      );
+      assert.ok(
+        afterHydration.sizes,
+        'Expected post-hydration Next Image sizes markup.'
+      );
+      equalRectangles(afterHydration.image, afterHydration.poster);
+      equalRectangles(afterHydration.image, beforeHydration.image);
+      equalRectangles(afterHydration.poster, beforeHydration.poster);
+      assert.deepEqual(failures, []);
+    } finally {
+      releaseHeldScripts();
+    }
   },
   closeBrowser: () => browser?.close(),
   terminateServer: () => terminate(server)
