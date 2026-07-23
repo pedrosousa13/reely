@@ -36,3 +36,17 @@ jobs:
       # pnpm appends a literal `--` to compound scripts, which playwright would
       # misread as a file filter, so the flags are appended without it.
       - run: pnpm test:e2e --project=webkit --grep hls
+
+  storybook:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: corepack enable
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm exec playwright install --with-deps chromium
+      - run: pnpm --filter @reely/storybook build
+      - run: pnpm test:storybook
