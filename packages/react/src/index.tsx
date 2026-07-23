@@ -470,7 +470,10 @@ export const Root = ({
   }, [controller, reconcileMuted, reconcilePlaybackRate, reconcileVolume]);
 
   const attachMedia = useCallback(
-    (media: HTMLVideoElement | null) => {
+    (
+      media: HTMLVideoElement | null,
+      mediaSourceTransition: SourceTransition | undefined
+    ) => {
       const previousLoadedDataListener = loadedDataListener.current;
       if (previousLoadedDataListener) {
         previousLoadedDataListener.media.removeEventListener(
@@ -479,7 +482,9 @@ export const Root = ({
         );
         loadedDataListener.current = undefined;
       }
-      providerSourceTransition.current = media ? sourceTransition : undefined;
+      providerSourceTransition.current = media
+        ? mediaSourceTransition
+        : undefined;
       pendingMuted.current = undefined;
       pendingVolume.current = undefined;
       pendingPlaybackRate.current = undefined;
@@ -509,13 +514,13 @@ export const Root = ({
         controller.configureAutoplay(autoplayConfiguration.current.autoplay, {
           controlledMuted: autoplayConfiguration.current.muted
         });
-        const mediaSourceTransition = sourceTransition;
+        const attachedSourceTransition = mediaSourceTransition!;
         const onLoadedData = () => {
           if (
             currentMedia.current === media &&
-            providerSourceTransition.current === mediaSourceTransition
+            providerSourceTransition.current === attachedSourceTransition
           ) {
-            setHiddenTransition(mediaSourceTransition);
+            setHiddenTransition(attachedSourceTransition);
           }
         };
         media.addEventListener('loadeddata', onLoadedData);
@@ -530,7 +535,7 @@ export const Root = ({
         media ? createNativeProvider(media, options) : undefined
       );
     },
-    [controller, ensurePreferenceSubscription, sourceTransition]
+    [controller, ensurePreferenceSubscription]
   );
 
   const registerMedia = useCallback(
@@ -541,13 +546,21 @@ export const Root = ({
       )
         return;
       currentMedia.current = media;
-      attachMedia(media);
+      attachMedia(media, media ? sourceTransition : undefined);
     },
-    [attachMedia, controller]
+    [attachMedia, controller, sourceTransition]
   );
 
   useEffect(() => {
-    registerMedia(currentMedia.current);
+    const media = currentMedia.current;
+    const mediaSourceTransition = providerSourceTransition.current;
+    if (
+      media &&
+      mediaSourceTransition &&
+      controller.getState().provider === null
+    ) {
+      attachMedia(media, mediaSourceTransition);
+    }
     const unsubscribePoster = controller.subscribe((state) => {
       if (state.playback === 'playing' && providerSourceTransition.current) {
         setHiddenTransition(providerSourceTransition.current);
@@ -564,13 +577,15 @@ export const Root = ({
       }
       controller.setProvider(undefined);
     };
-  }, [controller, registerMedia]);
+  }, [attachMedia, controller]);
 
   useEffect(() => {
     const media = currentMedia.current;
+    const mediaSourceTransition = providerSourceTransition.current;
     const applied = appliedNativePlaybackOptions.current;
     if (
       !media ||
+      !mediaSourceTransition ||
       !applied ||
       (Object.is(applied.endTime, endTime) &&
         Object.is(applied.loop, loop) &&
@@ -578,7 +593,7 @@ export const Root = ({
     ) {
       return;
     }
-    attachMedia(media);
+    attachMedia(media, mediaSourceTransition);
   }, [attachMedia, endTime, loop, startTime]);
 
   useEffect(() => {

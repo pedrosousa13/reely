@@ -1018,6 +1018,38 @@ test('replaces the provider once when native playback options change', async () 
   unsubscribe?.();
 });
 
+test('attaches and loads one provider without detaching on source switch', async () => {
+  const load = vi
+    .spyOn(HTMLMediaElement.prototype, 'load')
+    .mockImplementation(() => undefined);
+  const handle = createRef<Player.PlayerHandle>();
+  const player = (source: string) => (
+    <Player.Root ref={handle} source={source}>
+      <Player.Media />
+    </Player.Root>
+  );
+  const { rerender } = render(player('/first.mp4'));
+  await waitFor(() => expect(load).toHaveBeenCalledOnce());
+  load.mockClear();
+  const providerStates: Array<string | null> = [];
+  const unsubscribe = handle.current?.subscribe((state) =>
+    providerStates.push(state.provider)
+  );
+  providerStates.length = 0;
+
+  rerender(player('/second.mp4'));
+  await waitFor(() => expect(load).toHaveBeenCalled());
+  await Promise.resolve();
+
+  expect(load).toHaveBeenCalledOnce();
+  expect(providerStates).toEqual(expect.arrayContaining(['native']));
+  expect(providerStates.lastIndexOf(null)).toBeLessThan(
+    providerStates.indexOf('native')
+  );
+  expect(handle.current?.getState().provider).toBe('native');
+  unsubscribe?.();
+});
+
 test('destroys the previous native adapter and ignores its stale events on source switch', async () => {
   const removeEventListener = vi.spyOn(
     HTMLMediaElement.prototype,
