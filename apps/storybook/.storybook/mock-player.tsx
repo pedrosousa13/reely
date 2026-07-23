@@ -20,6 +20,8 @@ import { useEffect, useRef, type ReactNode } from 'react';
  *   `state` to reproduce blocked autoplay.
  * - `playResult` — what the fake provider's `play()` resolves to.
  * - `rootProps` — overrides for the `Player.Root` the decorator renders.
+ *   Use the `autoplay` knob above rather than `rootProps.autoplay`: the Root
+ *   prop re-applies its own `configureAutoplay` and collides with the mock.
  */
 export type MockPlayerParameters = {
   readonly state?: ProviderStatePatch;

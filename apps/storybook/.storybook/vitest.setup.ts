@@ -24,7 +24,7 @@ const externalUrl = (raw: string): string | undefined => {
 const externalUrlsInDom = (): string[] => {
   const urls: string[] = [];
   const elements = document.querySelectorAll(
-    'img, source, video, audio, iframe, embed, object, script[src], link[rel="stylesheet"]'
+    'img, source, video, audio, iframe, embed, object, script[src], link[href]'
   );
   for (const element of elements) {
     for (const attribute of ['src', 'href', 'data'] as const) {
@@ -48,6 +48,7 @@ const fetchedUrls: string[] = [];
 const originalFetch = globalThis.fetch;
 
 beforeEach(() => {
+  performance.setResourceTimingBufferSize(10_000);
   performance.clearResourceTimings();
   fetchedUrls.length = 0;
   globalThis.fetch = (input, init) => {
