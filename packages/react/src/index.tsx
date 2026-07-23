@@ -674,22 +674,31 @@ const assignRef = <Value,>(
 
 export const Viewport = ({ children, ref, style, ...rest }: ViewportProps) => {
   const { registerViewport } = usePlayer();
+  const viewportNode = useRef<HTMLDivElement | null>(null);
   const mergedRef = useCallback(
     (node: HTMLDivElement | null) => {
-      const consumerCleanup = assignRef(ref, node);
+      viewportNode.current = node;
       registerViewport(node);
       if (!node) return;
       return () => {
-        if (consumerCleanup) {
-          consumerCleanup();
-        } else {
-          assignRef(ref, null);
-        }
+        viewportNode.current = null;
         registerViewport(null);
       };
     },
-    [ref, registerViewport]
+    [registerViewport]
   );
+  useEffect(() => {
+    const node = viewportNode.current;
+    if (!node) return;
+    const consumerCleanup = assignRef(ref, node);
+    return () => {
+      if (consumerCleanup) {
+        consumerCleanup();
+      } else {
+        assignRef(ref, null);
+      }
+    };
+  }, [ref]);
   return (
     <div
       {...rest}
