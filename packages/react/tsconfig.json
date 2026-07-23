@@ -7,7 +7,7 @@
     "emitDeclarationOnly": true,
     "outDir": "dist",
     "rootDir": "src",
-    "tsBuildInfoFile": "dist/.tsbuildinfo"
+    "tsBuildInfoFile": ".tsbuildinfo"
   },
   "references": [{ "path": "../core" }, { "path": "../provider-native" }],
   "include": ["src"]
