@@ -33,6 +33,73 @@ const replacementSource = sourceChange
   ? 'https://provider.invalid/source-b.mp4'
   : null;
 
+const PresentationControls = () => {
+  const presentation = Player.usePlayerState((state) => ({
+    fullscreen: state.fullscreen,
+    fullscreenStatus: state.capabilities.fullscreen.status,
+    fullscreenReason:
+      'reason' in state.capabilities.fullscreen
+        ? state.capabilities.fullscreen.reason
+        : undefined,
+    pictureInPicture: state.pictureInPicture,
+    pictureInPictureStatus: state.capabilities.pictureInPicture.status,
+    pictureInPictureReason:
+      'reason' in state.capabilities.pictureInPicture
+        ? state.capabilities.pictureInPicture.reason
+        : undefined
+  }));
+  const actions = Player.usePlayerActions();
+
+  return (
+    <p
+      data-testid="presentation-capabilities"
+      data-fullscreen-status={presentation.fullscreenStatus}
+      data-fullscreen-reason={presentation.fullscreenReason}
+      data-fullscreen-state={presentation.fullscreen ? 'active' : 'inline'}
+      data-pip-status={presentation.pictureInPictureStatus}
+      data-pip-reason={presentation.pictureInPictureReason}
+      data-pip-state={presentation.pictureInPicture ? 'active' : 'inline'}
+    >
+      {presentation.fullscreenStatus === 'available' ? (
+        <button
+          data-testid="fullscreen-toggle"
+          onClick={() =>
+            void (presentation.fullscreen
+              ? actions.exitFullscreen()
+              : actions.requestFullscreen())
+          }
+          type="button"
+        >
+          {presentation.fullscreen ? 'Exit fullscreen' : 'Enter fullscreen'}
+        </button>
+      ) : null}{' '}
+      {presentation.pictureInPictureStatus === 'available' ? (
+        <button
+          data-testid="pip-toggle"
+          onClick={() =>
+            void (presentation.pictureInPicture
+              ? actions.exitPictureInPicture()
+              : actions.requestPictureInPicture())
+          }
+          type="button"
+        >
+          {presentation.pictureInPicture
+            ? 'Exit picture-in-picture'
+            : 'Enter picture-in-picture'}
+        </button>
+      ) : null}{' '}
+      Fullscreen: {presentation.fullscreenStatus}
+      {presentation.fullscreenReason
+        ? ` (${presentation.fullscreenReason})`
+        : ''}{' '}
+      · Picture-in-picture: {presentation.pictureInPictureStatus}
+      {presentation.pictureInPictureReason
+        ? ` (${presentation.pictureInPictureReason})`
+        : ''}
+    </p>
+  );
+};
+
 const PlayerFixture = () => {
   const [source, setSource] = useState(activationSource);
 
@@ -68,6 +135,7 @@ const PlayerFixture = () => {
           <Player.Media />
         </Player.Viewport>
         <Player.PlayButton />
+        <PresentationControls />
       </Player.Root>
       {replacementSource && source !== replacementSource ? (
         <button onClick={() => setSource(replacementSource)} type="button">
@@ -226,6 +294,86 @@ await seekTo(30) // { ok: true } or { ok: false, reason, error? }`}</pre>
       There is deliberately no <code>playing</code> prop: playback is confirmed
       provider state, so use player actions to request play or pause and read
       the result with <code>usePlayerState</code>.
+    </p>
+    <h2>Fullscreen and Picture-in-Picture</h2>
+    <p>
+      <code>requestFullscreen</code>, <code>exitFullscreen</code>,{' '}
+      <code>requestPictureInPicture</code>, and{' '}
+      <code>exitPictureInPicture</code> are typed commands with confirmed state:{' '}
+      <code>state.fullscreen</code> and <code>state.pictureInPicture</code>{' '}
+      change only after the platform reports the transition. Capabilities report
+      what the current environment actually supports, so gate controls on{' '}
+      <code>capabilities.fullscreen</code> and{' '}
+      <code>capabilities.pictureInPicture</code> being <code>available</code>.
+    </p>
+    <pre>{`const fullscreen = Player.usePlayerState(
+  (state) => state.capabilities.fullscreen
+)
+const { requestFullscreen } = Player.usePlayerActions()
+
+{fullscreen.status === 'available' && (
+  <button onClick={() => void requestFullscreen()}>Fullscreen</button>
+)}`}</pre>
+    <h3>Platform support matrix</h3>
+    <table>
+      <thead>
+        <tr>
+          <th>Platform</th>
+          <th>Fullscreen</th>
+          <th>Picture-in-Picture</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Chrome / Edge (desktop, Android)</td>
+          <td>Standard Fullscreen API — available</td>
+          <td>Standard Picture-in-Picture API — available</td>
+        </tr>
+        <tr>
+          <td>Firefox (desktop, Android)</td>
+          <td>Standard Fullscreen API — available</td>
+          <td>
+            No programmatic API — <code>unavailable</code> (reason{' '}
+            <code>browser</code>)
+          </td>
+        </tr>
+        <tr>
+          <td>Safari (macOS, iPadOS)</td>
+          <td>Standard Fullscreen API — available</td>
+          <td>WebKit presentation mode — available</td>
+        </tr>
+        <tr>
+          <td>Safari (iPhone)</td>
+          <td>
+            WebKit video fullscreen (<code>webkitEnterFullscreen</code>) —{' '}
+            <code>unknown</code> (reason <code>not-ready</code>) until media
+            metadata resolves support
+          </td>
+          <td>WebKit presentation mode — available (iOS 14+)</td>
+        </tr>
+        <tr>
+          <td>
+            Embeds without <code>allow="fullscreen"</code> /{' '}
+            <code>allow="picture-in-picture"</code>
+          </td>
+          <td>
+            <code>unavailable</code> (reason <code>policy</code>)
+          </td>
+          <td>
+            <code>unavailable</code> (reason <code>policy</code>)
+          </td>
+        </tr>
+      </tbody>
+    </table>
+    <p>
+      Policy restrictions and user-gesture requirements never throw through the
+      UI: commands resolve to{' '}
+      <code>
+        {'{'} ok: false, reason: 'blocked', error: {'{'} category: 'policy'{' '}
+        {'}'} {'}'}
+      </code>
+      . A media element with <code>disablePictureInPicture</code> reports the
+      capability as <code>unavailable</code> with reason <code>policy</code>.
     </p>
     <h2>Autoplay</h2>
     <p>
