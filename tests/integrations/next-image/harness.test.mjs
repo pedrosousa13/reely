@@ -1,6 +1,66 @@
 import assert from 'node:assert/strict';
+import { EventEmitter } from 'node:events';
 import test from 'node:test';
-import { runWithCleanup } from './harness.mjs';
+import { runWithCleanup, startNext } from './harness.mjs';
+
+class FakeServer extends EventEmitter {
+  stdout = new EventEmitter();
+  stderr = new EventEmitter();
+  exitCode = null;
+  signals = [];
+
+  kill(signal) {
+    this.signals.push(signal);
+    this.exitCode = 0;
+    this.emit('exit', 0);
+    return true;
+  }
+}
+
+test('accepts a bounded startup lifecycle seam', () => {
+  assert.equal(startNext.length, 2);
+});
+
+test(
+  'terminates Next before rejecting a startup timeout',
+  { skip: startNext.length < 2 },
+  async () => {
+    const server = new FakeServer();
+
+    await assert.rejects(
+      startNext('fixture', { spawnProcess: () => server, startupTimeoutMs: 1 }),
+      /Timed out waiting for next start/
+    );
+
+    assert.deepEqual(server.signals, ['SIGTERM']);
+    assert.equal(server.listenerCount('error'), 0);
+    assert.equal(server.listenerCount('exit'), 0);
+    assert.equal(server.stdout.listenerCount('data'), 0);
+    assert.equal(server.stderr.listenerCount('data'), 0);
+  }
+);
+
+test(
+  'rejects the original spawn error after lifecycle cleanup',
+  { skip: startNext.length < 2 },
+  async () => {
+    const server = new FakeServer();
+    const spawnFailure = new Error('spawn failed');
+    const startup = startNext('fixture', {
+      spawnProcess: () => server,
+      startupTimeoutMs: 1_000
+    });
+
+    server.emit('error', spawnFailure);
+
+    await assert.rejects(startup, spawnFailure);
+    assert.deepEqual(server.signals, ['SIGTERM']);
+    assert.equal(server.listenerCount('error'), 0);
+    assert.equal(server.listenerCount('exit'), 0);
+    assert.equal(server.stdout.listenerCount('data'), 0);
+    assert.equal(server.stderr.listenerCount('data'), 0);
+  }
+);
 
 test('terminates Next after browser cleanup fails', async () => {
   const browserFailure = new Error('browser close failed');
