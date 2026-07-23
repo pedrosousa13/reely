@@ -1,0 +1,14 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "composite": true,
+    "noEmit": true,
+    "types": ["node", "vite/client"],
+    "tsBuildInfoFile": "dist/.tsbuildinfo"
+  },
+  "references": [
+    { "path": "../../packages/core" },
+    { "path": "../../packages/react" }
+  ],
+  "include": [".storybook/**/*", "stories/**/*", "vitest.config.ts"]
+}

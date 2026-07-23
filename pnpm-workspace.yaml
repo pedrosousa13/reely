@@ -4,6 +4,7 @@ packages:
   - tests/bundle/*
   - tests/integrations/*
 allowBuilds:
+  esbuild@0.28.1: true
   sharp@0.34.5: true
 minimumReleaseAgeExclude:
   - '@vitejs/plugin-react@6.0.4'
