@@ -9,6 +9,7 @@ import { loadProvider } from '../src/provider-loaders';
 const harness = vi.hoisted(() => ({
   fakes: [] as Array<{
     adapter: import('@reely/core').ProviderAdapter;
+    counts: () => Record<string, number>;
     emit: (patch: import('@reely/core').ProviderStatePatch) => void;
   }>
 }));
@@ -63,6 +64,111 @@ test('the loader rejects a YouTube source without an embed mount', async () => {
     })
   ).rejects.toThrow('The YouTube provider requires a media mount.');
   expect(mockedCreateYouTubeProvider).not.toHaveBeenCalled();
+});
+
+const emitYouTubeReady = (
+  fake: (typeof harness.fakes)[number],
+  overrides: Partial<import('@reely/core').PlayerState> = {}
+) =>
+  act(() => {
+    fake.emit({
+      lifecycle: 'ready',
+      activation: 'ready',
+      muted: false,
+      volume: 1,
+      playbackRate: 1,
+      ...overrides
+    });
+  });
+
+test('replays desired preferences once the YouTube provider is ready', async () => {
+  render(
+    <Player.Root
+      loading="eager"
+      muted
+      playbackRate={1.5}
+      source={{ type: 'youtube', videoId: 'dQw4w9WgXcQ' }}
+      volume={0.5}
+    >
+      <Player.Viewport>
+        <Player.Media />
+      </Player.Viewport>
+    </Player.Root>
+  );
+
+  await waitFor(() =>
+    expect(mockedCreateYouTubeProvider).toHaveBeenCalledTimes(1)
+  );
+  const fake = harness.fakes[0]!;
+  expect(fake.counts()).toMatchObject({
+    muteCount: 0,
+    playbackRateCount: 0,
+    volumeCount: 0
+  });
+
+  emitYouTubeReady(fake);
+
+  await waitFor(() =>
+    expect(fake.counts()).toMatchObject({
+      muteCount: 1,
+      playbackRateCount: 1,
+      volumeCount: 1
+    })
+  );
+});
+
+test('replays uncontrolled default preferences once the provider is ready', async () => {
+  render(
+    <Player.Root
+      defaultMuted
+      loading="eager"
+      source={{ type: 'youtube', videoId: 'dQw4w9WgXcQ' }}
+    >
+      <Player.Viewport>
+        <Player.Media />
+      </Player.Viewport>
+    </Player.Root>
+  );
+
+  await waitFor(() =>
+    expect(mockedCreateYouTubeProvider).toHaveBeenCalledTimes(1)
+  );
+  const fake = harness.fakes[0]!;
+
+  emitYouTubeReady(fake);
+
+  await waitFor(() => expect(fake.counts()).toMatchObject({ muteCount: 1 }));
+  expect(fake.counts()).toMatchObject({ unmuteCount: 0, volumeCount: 0 });
+});
+
+test('skips the preference replay when the ready state already matches', async () => {
+  render(
+    <Player.Root
+      loading="eager"
+      source={{ type: 'youtube', videoId: 'dQw4w9WgXcQ' }}
+    >
+      <Player.Viewport>
+        <Player.Media />
+      </Player.Viewport>
+    </Player.Root>
+  );
+
+  await waitFor(() =>
+    expect(mockedCreateYouTubeProvider).toHaveBeenCalledTimes(1)
+  );
+  const fake = harness.fakes[0]!;
+
+  emitYouTubeReady(fake);
+  emitYouTubeReady(fake);
+
+  await waitFor(() =>
+    expect(fake.counts()).toMatchObject({
+      muteCount: 0,
+      playbackRateCount: 0,
+      unmuteCount: 0,
+      volumeCount: 0
+    })
+  );
 });
 
 test('renders no Reely control layer over a ready YouTube embed', async () => {

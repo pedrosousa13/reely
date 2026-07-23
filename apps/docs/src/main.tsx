@@ -447,6 +447,12 @@ await selectQuality(null) // back to automatic adaptation`}</pre>
         through the document fullscreen state.
       </li>
       <li>
+        Initial muted, volume, and playback-rate preferences cannot be seeded on
+        an element, so Reely replays them through the iframe API once the player
+        reports ready; commands report intended values immediately and the
+        player confirms through its own events and polling.
+      </li>
+      <li>
         Timing is polled while playing (the iframe API emits no time-update
         events), so <code>currentTime</code> advances in coarse steps.
       </li>

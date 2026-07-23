@@ -298,6 +298,7 @@ export const Root = ({
   const loadedDataListener = useRef<
     { media: HTMLVideoElement; listener: () => void } | undefined
   >(undefined);
+  const embedPreferenceSeed = useRef<(() => void) | undefined>(undefined);
   const desiredMuted = useRef(muted ?? defaultMuted);
   const desiredVolume = useRef(volume ?? defaultVolume);
   const desiredPlaybackRate = useRef(playbackRate ?? defaultPlaybackRate);
@@ -486,6 +487,8 @@ export const Root = ({
       listener.media.removeEventListener('loadeddata', listener.listener);
       loadedDataListener.current = undefined;
     }
+    embedPreferenceSeed.current?.();
+    embedPreferenceSeed.current = undefined;
     currentMedia.current = null;
     providerSourceTransition.current = undefined;
   }, []);
@@ -525,7 +528,58 @@ export const Root = ({
       controller.configureAutoplay(autoplayConfiguration.current.autoplay, {
         controlledMuted: autoplayConfiguration.current.muted
       });
-      if (!(media instanceof HTMLVideoElement)) return;
+      if (!(media instanceof HTMLVideoElement)) {
+        // Embed mounts have no seedable element properties, so replay the
+        // desired preferences through provider commands once the provider
+        // confirms ready state. No confirmed user change can land earlier:
+        // commands against a non-ready provider fail as not-ready.
+        const seedTransition = sourceTransition;
+        const subscription: { unsubscribe?: () => void } = {};
+        let disposed = false;
+        const dispose = (): void => {
+          if (disposed) return;
+          disposed = true;
+          subscription.unsubscribe?.();
+          if (embedPreferenceSeed.current === dispose) {
+            embedPreferenceSeed.current = undefined;
+          }
+        };
+        embedPreferenceSeed.current = dispose;
+        subscription.unsubscribe = controller.subscribe((state) => {
+          if (disposed) return;
+          if (
+            currentMedia.current !== media ||
+            providerSourceTransition.current !== seedTransition
+          ) {
+            dispose();
+            return;
+          }
+          if (state.lifecycle !== 'ready' || state.activation !== 'ready') {
+            return;
+          }
+          dispose();
+          const nextMuted = controlledMuted.current ?? desiredMuted.current;
+          const nextVolume = controlledVolume.current ?? desiredVolume.current;
+          const nextPlaybackRate =
+            controlledPlaybackRate.current ?? desiredPlaybackRate.current;
+          if (state.muted !== nextMuted) reconcileMuted(nextMuted);
+          if (Number.isFinite(nextVolume)) {
+            const boundedVolume = Math.min(1, Math.max(0, nextVolume));
+            if (!Object.is(state.volume, boundedVolume)) {
+              reconcileVolume(boundedVolume);
+            }
+          }
+          if (
+            Number.isFinite(nextPlaybackRate) &&
+            nextPlaybackRate > 0 &&
+            !Object.is(state.playbackRate, nextPlaybackRate)
+          ) {
+            reconcilePlaybackRate(nextPlaybackRate);
+          }
+        });
+        if (disposed) subscription.unsubscribe();
+        return;
+      }
       const attachedSourceTransition = sourceTransition;
       const onLoadedData = () => {
         if (
@@ -545,6 +599,9 @@ export const Root = ({
       controller,
       detachPreparedMedia,
       ensurePreferenceSubscription,
+      reconcileMuted,
+      reconcilePlaybackRate,
+      reconcileVolume,
       sourceTransition
     ]
   );
