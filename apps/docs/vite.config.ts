@@ -15,6 +15,9 @@ export default defineConfig({
       '@reely/provider-hls': fileURLToPath(
         new URL('../../packages/provider-hls/src/index.ts', import.meta.url)
       ),
+      '@reely/provider-youtube': fileURLToPath(
+        new URL('../../packages/provider-youtube/src/index.ts', import.meta.url)
+      ),
       '@reely/react': fileURLToPath(
         new URL('../../packages/react/src/index.tsx', import.meta.url)
       )

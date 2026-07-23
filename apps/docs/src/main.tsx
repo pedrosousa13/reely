@@ -29,6 +29,7 @@ const hlsEngine: 'auto' | 'native' | 'hls.js' =
   engineParameter === 'native' || engineParameter === 'hls.js'
     ? engineParameter
     : 'auto';
+const youtubeExampleUrl = 'https://www.youtube.com/watch?v=M7lc1UVf-VE';
 const activationSource: Player.RootProps['source'] =
   parameters.get('source') === 'hls'
     ? { type: 'hls', src: '/hls/master.m3u8', engine: hlsEngine }
@@ -36,7 +37,9 @@ const activationSource: Player.RootProps['source'] =
       ? 'https://provider.invalid/source-a.mp4'
       : parameters.get('activationSource') === 'external'
         ? 'https://provider.invalid/tracer.mp4'
-        : '/tracer.mp4';
+        : parameters.get('activationSource') === 'youtube'
+          ? youtubeExampleUrl
+          : '/tracer.mp4';
 const replacementSource = sourceChange
   ? 'https://provider.invalid/source-b.mp4'
   : null;
@@ -168,6 +171,19 @@ const PlayerFixture = () => {
   );
 };
 
+const YouTubeExample = () => (
+  <Player.Root loading="interaction" source={youtubeExampleUrl}>
+    <Player.Viewport
+      data-testid="youtube-example"
+      style={{ aspectRatio: '16 / 9', maxWidth: '48rem', width: '100%' }}
+    >
+      <Player.ActivationButton aria-label="Play YouTube example" />
+      <Player.LoadingIndicator />
+      <Player.Media />
+    </Player.Viewport>
+  </Player.Root>
+);
+
 const App = () => (
   <>
     <h1>Reely</h1>
@@ -263,8 +279,9 @@ const App = () => (
     <p>
       <code>Player.Root</code> accepts MP4, WebM, HLS, YouTube, and Vimeo
       strings, or an explicit source object. The native tracer above remains a
-      working MP4 example. HLS VOD sources load through the HLS provider;
-      YouTube and Vimeo sources are detected but not loaded yet.
+      working MP4 example. HLS VOD sources load through the HLS provider and
+      YouTube sources through the YouTube iframe player; Vimeo sources are
+      detected but not loaded yet.
     </p>
     <h2>HLS</h2>
     <p>
@@ -372,6 +389,68 @@ await selectQuality(null) // back to automatic adaptation`}</pre>
       errors map to <code>network</code>, <code>decode</code>, or{' '}
       <code>source</code> exactly as for MP4 playback.
     </p>
+    <h2>YouTube</h2>
+    <p>
+      YouTube sources load the YouTube iframe player on demand: no YouTube
+      code is in the initial bundle and no YouTube-domain request happens
+      until the activation strategy allows it. Embeds use the
+      privacy-enhanced <code>youtube-nocookie.com</code> host.
+    </p>
+    <YouTubeExample />
+    <pre>{`<Player.Root source="https://www.youtube.com/watch?v=M7lc1UVf-VE" loading="interaction">
+  <Player.Viewport>
+    <Player.ActivationButton />
+    <Player.LoadingIndicator />
+    <Player.Media />
+  </Player.Viewport>
+</Player.Root>`}</pre>
+    <p>
+      YouTube always uses its own player controls. YouTube&apos;s developer
+      policy prohibits blocking or obscuring standard player features
+      (branding, settings, watch-later, and so on), so Reely never overlays a
+      control layer on the iframe; <code>customControls</code> reports{' '}
+      <code>unavailable</code> with reason <code>policy</code>. This is a
+      policy constraint, not a technical one.
+    </p>
+    <p>
+      Honest limits of the iframe embed, with no parity claims against native
+      playback:
+    </p>
+    <ul>
+      <li>
+        YouTube branding and links to youtube.com stay visible inside the
+        player; embedded plays may not count toward public view counts until
+        YouTube validates them.
+      </li>
+      <li>
+        Captions are controlled from the YouTube settings menu inside the
+        iframe. Reely cannot list or select YouTube text tracks, so{' '}
+        <code>selectTextTrack</code> reports <code>unavailable</code>.
+      </li>
+      <li>
+        On mobile, playback is inline (<code>playsinline</code>) where the OS
+        allows it; iOS may still take over presentation, and programmatic
+        playback generally requires a user gesture.
+      </li>
+      <li>
+        Autoplay follows browser policy. YouTube does not report a blocked
+        autoplay attempt as an error, it just stays paused; Reely reports an
+        unconfirmed play request as <code>blocked</code> instead of
+        conflating it with a provider that is not ready.
+      </li>
+      <li>
+        The player lives in a cross-origin iframe: picture-in-picture and
+        AirPlay report <code>unavailable</code>, volume and mute changes made
+        inside the YouTube controls are not observable as events, and
+        fullscreen wraps the whole iframe so the YouTube chrome stays
+        interactive. Entering fullscreen from the YouTube button inside the
+        iframe is still tracked through the document fullscreen state.
+      </li>
+      <li>
+        Timing is polled while playing (the iframe API emits no time-update
+        events), so <code>currentTime</code> advances in coarse steps.
+      </li>
+    </ul>
     <h2>Playback API</h2>
     <p>
       Get a <code>PlayerHandle</code> from the <code>ref</code> prop on{' '}
