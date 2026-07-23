@@ -1,6 +1,7 @@
 packages:
   - packages/*
   - apps/*
+  - tests/bundle/*
   - tests/integrations/*
 allowBuilds:
   sharp@0.34.5: true

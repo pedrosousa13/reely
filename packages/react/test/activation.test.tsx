@@ -1,6 +1,12 @@
 // @vitest-environment happy-dom
 
-import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  screen
+} from '@testing-library/react';
 import { createRef, useLayoutEffect } from 'react';
 import { renderToString } from 'react-dom/server';
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
@@ -24,6 +30,7 @@ class ControlledIntersectionObserver implements IntersectionObserver {
   readonly root = null;
   readonly thresholds = [0];
   readonly rootMargin: string;
+  readonly scrollMargin = '0px';
   private readonly callback: IntersectionObserverCallback;
   private target?: Element;
 
@@ -89,7 +96,12 @@ const ActivationProbe = ({
   source = '/tracer.mp4',
   viewportKey = 'viewport'
 }: ActivationProbeProps) => {
-  const activation = useActivation({
+  const {
+    activateFromInteraction,
+    mediaEligible,
+    registerMedia,
+    registerViewport
+  } = useActivation({
     autoplay,
     controller,
     loadMargin: '200px 0px',
@@ -99,22 +111,24 @@ const ActivationProbe = ({
     preload: 'metadata',
     source: detectSource(source)
   });
-  onActivate?.(activation.activateFromInteraction);
-  useLayoutEffect(() => onLayout?.(), [onLayout]);
+  useLayoutEffect(() => {
+    onActivate?.(activateFromInteraction);
+    onLayout?.();
+  }, [activateFromInteraction, onActivate, onLayout]);
   return (
     <>
       {showViewport ? (
         <div
           data-testid="activation-viewport"
           key={viewportKey}
-          ref={activation.registerViewport}
+          ref={registerViewport}
         />
       ) : null}
-      {activation.mediaEligible && showMedia ? (
+      {mediaEligible && showMedia ? (
         <video
           data-testid="activation-media"
           key={mediaKey}
-          ref={activation.registerMedia}
+          ref={registerMedia}
         />
       ) : null}
     </>
@@ -268,24 +282,15 @@ test('interaction plays once when installation synchronously becomes ready', asy
   const playWithOrigin = vi.spyOn(controller, 'playWithOrigin');
   let activateFromInteraction!: () => void;
 
-  const Probe = () => {
-    const activation = useActivation({
-      autoplay: false,
-      controller,
-      loadMargin: '200px 0px',
-      loading: 'interaction',
-      nativeOptions: {},
-      prepareMedia: () => undefined,
-      preload: 'metadata',
-      source: detectSource('/tracer.mp4')
-    });
-    activateFromInteraction = activation.activateFromInteraction;
-    return activation.mediaEligible ? (
-      <video ref={activation.registerMedia} />
-    ) : null;
-  };
-
-  render(<Probe />);
+  render(
+    <ActivationProbe
+      controller={controller}
+      loading="interaction"
+      onActivate={(activate) => {
+        activateFromInteraction = activate;
+      }}
+    />
+  );
   act(() => activateFromInteraction());
 
   await vi.waitFor(() =>
@@ -556,11 +561,15 @@ test('real loader returns a Promise and rejects a missing media mount', async ()
   const actual = await vi.importActual<
     typeof import('../src/provider-loaders')
   >('../src/provider-loaders');
+  const detectedSource = detectSource('/tracer.mp4');
+  if (detectedSource.status !== 'success') {
+    throw new Error('The native test source was not detected.');
+  }
 
   const result = actual.loadProvider({
     media: null,
     nativeOptions: {},
-    source: detectSource('/tracer.mp4').source
+    source: detectedSource.source
   });
 
   expect(result).toBeInstanceOf(Promise);
@@ -775,9 +784,9 @@ test('retries an installed provider error with one queued user play', async () =
   );
 
   act(() => stale.emit({ activation: 'error', lifecycle: 'error' }));
-  expect(await screen.findByRole('button', { name: 'Retry loading video' })).toBe(
-    button
-  );
+  expect(
+    await screen.findByRole('button', { name: 'Retry loading video' })
+  ).toBe(button);
   expect(document.activeElement).toBe(button);
 
   fireEvent.click(button);

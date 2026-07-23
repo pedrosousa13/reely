@@ -37,9 +37,10 @@ vi.mock('../src/provider-loaders', async () => {
   };
 });
 
-class ImmediateIntersectionObserver {
+class ImmediateIntersectionObserver implements IntersectionObserver {
   readonly root = null;
   readonly rootMargin = '200px 0px';
+  readonly scrollMargin = '0px';
   readonly thresholds = [0];
   constructor(private callback: IntersectionObserverCallback) {}
   disconnect = () => undefined;
@@ -56,7 +57,7 @@ class ImmediateIntersectionObserver {
           time: 0
         }
       ],
-      this as unknown as IntersectionObserver
+      this
     );
   takeRecords = () => [];
   unobserve = () => undefined;
@@ -890,10 +891,9 @@ test('throws a clear error when player hooks are used outside Root', () => {
 
 test('reads the same controller state through PlayerHandle and usePlayerState', () => {
   const handle = createRef<Player.PlayerHandle>();
-  let selectedPlayback = 'unobserved';
   const Probe = () => {
-    selectedPlayback = Player.usePlayerState((state) => state.playback);
-    return null;
+    const selectedPlayback = Player.usePlayerState((state) => state.playback);
+    return <output data-testid="selected-playback">{selectedPlayback}</output>;
   };
   render(
     <LegacyRoot ref={handle} source="/tracer.mp4">
@@ -904,15 +904,15 @@ test('reads the same controller state through PlayerHandle and usePlayerState', 
 
   fireEvent.play(screen.getByLabelText('Reely media'));
 
-  expect(selectedPlayback).toBe('playing');
+  expect(screen.getByTestId('selected-playback').textContent).toBe('playing');
   expect(handle.current?.getState().playback).toBe('playing');
 });
 
 test('does not rerender a selector when an unrelated confirmed state changes', () => {
-  let renders = 0;
+  const renderSpy = vi.fn();
   const Volume = () => {
     Player.usePlayerState((state) => state.volume);
-    renders += 1;
+    renderSpy();
     return null;
   };
 
@@ -922,20 +922,20 @@ test('does not rerender a selector when an unrelated confirmed state changes', (
       <Volume />
     </LegacyRoot>
   );
-  const initialRenders = renders;
+  const initialRenders = renderSpy.mock.calls.length;
 
   fireEvent.play(screen.getByLabelText('Reely media'));
 
-  expect(renders).toBe(initialRenders);
+  expect(renderSpy).toHaveBeenCalledTimes(initialRenders);
 });
 
 test('caches an object selector and isolates it from unrelated state changes', () => {
-  let renders = 0;
+  const renderSpy = vi.fn();
   const Volume = () => {
     const selection = Player.usePlayerState((state) => ({
       volume: state.volume
     }));
-    renders += 1;
+    renderSpy();
     return <output>{selection.volume}</output>;
   };
 
@@ -945,12 +945,12 @@ test('caches an object selector and isolates it from unrelated state changes', (
       <Volume />
     </LegacyRoot>
   );
-  const initialRenders = renders;
+  const initialRenders = renderSpy.mock.calls.length;
 
   fireEvent.play(screen.getByLabelText('Reely media'));
 
   expect(screen.getByText('1')).toBeDefined();
-  expect(renders).toBe(initialRenders);
+  expect(renderSpy).toHaveBeenCalledTimes(initialRenders);
 });
 
 test('observes changes to enumerable symbol-key selector values', () => {
@@ -1112,12 +1112,10 @@ const posterPrimitives = Player as typeof Player & {
 };
 
 test('renders opaque custom and native picture posters in the fixed decorative layer', () => {
-  let renderCount = 0;
-  let observedMarker: object | undefined;
+  const renderSpy = vi.fn();
   const marker = {};
   const CustomPoster = ({ marker: receivedMarker }: { marker: object }) => {
-    renderCount += 1;
-    observedMarker = receivedMarker;
+    renderSpy(receivedMarker);
     return <span data-custom-poster />;
   };
   const { Poster } = posterPrimitives;
@@ -1153,8 +1151,7 @@ test('renders opaque custom and native picture posters in the fixed decorative l
   const media = screen.getByLabelText('Reely media');
   const picture = container.querySelector('picture[data-native-picture]');
 
-  expect(renderCount).toBe(1);
-  expect(observedMarker).toBe(marker);
+  expect(renderSpy).toHaveBeenCalledExactlyOnceWith(marker);
   expect((viewport as HTMLElement).style.position).toBe('relative');
   expect((viewport as HTMLElement).style.overflow).toBe('hidden');
   expect(media.getAttribute('data-reely-part')).toBe('media');

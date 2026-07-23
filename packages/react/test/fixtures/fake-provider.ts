@@ -6,7 +6,7 @@ import type {
   ProviderStatePatch
 } from '@reely/core';
 
-export const deferred = <Value,>() => {
+export const deferred = <Value>() => {
   let resolve!: (value: Value | PromiseLike<Value>) => void;
   let reject!: (reason?: unknown) => void;
   const promise = new Promise<Value>((nextResolve, nextReject) => {

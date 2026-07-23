@@ -6,10 +6,7 @@ import {
   type PlayerState
 } from '@reely/core';
 import type { NativePlaybackOptions } from '@reely/provider-native';
-import {
-  useActivation,
-  type ActivationBindings
-} from './use-activation';
+import { useActivation, type ActivationBindings } from './use-activation';
 import {
   createContext,
   isValidElement,
@@ -107,10 +104,7 @@ export type PlayerHandle = Pick<
 
 export type PlayerActions = Omit<PlayerHandle, 'getState' | 'subscribe' | 'on'>;
 
-export type {
-  PlayerLoadingStrategy,
-  PlayerPreload
-} from './use-activation';
+export type { PlayerLoadingStrategy, PlayerPreload } from './use-activation';
 
 export type PlayerActivationProps = {
   readonly loading?: import('./use-activation').PlayerLoadingStrategy;
@@ -118,21 +112,22 @@ export type PlayerActivationProps = {
   readonly preload?: import('./use-activation').PlayerPreload;
 };
 
-export type RootProps = NativePlaybackOptions & PlayerActivationProps & {
-  readonly autoplay?: AutoplayMode;
-  readonly children: ReactNode;
-  readonly defaultMuted?: boolean;
-  readonly defaultPlaybackRate?: number;
-  readonly defaultVolume?: number;
-  readonly muted?: boolean;
-  readonly onMutedChange?: (muted: boolean) => void;
-  readonly onPlaybackRateChange?: (playbackRate: number) => void;
-  readonly onVolumeChange?: (volume: number) => void;
-  readonly playbackRate?: number;
-  readonly ref?: Ref<PlayerHandle>;
-  readonly source: PlayerSource;
-  readonly volume?: number;
-};
+export type RootProps = NativePlaybackOptions &
+  PlayerActivationProps & {
+    readonly autoplay?: AutoplayMode;
+    readonly children: ReactNode;
+    readonly defaultMuted?: boolean;
+    readonly defaultPlaybackRate?: number;
+    readonly defaultVolume?: number;
+    readonly muted?: boolean;
+    readonly onMutedChange?: (muted: boolean) => void;
+    readonly onPlaybackRateChange?: (playbackRate: number) => void;
+    readonly onVolumeChange?: (volume: number) => void;
+    readonly playbackRate?: number;
+    readonly ref?: Ref<PlayerHandle>;
+    readonly source: PlayerSource;
+    readonly volume?: number;
+  };
 
 const PlayerContext = createContext<PlayerContextValue | null>(null);
 const PosterContext = createContext<'visible' | 'hidden'>('visible');
@@ -830,7 +825,8 @@ export const LoadingIndicator = ({
         pointerEvents: 'none'
       }}
     >
-      {children ?? (state === 'loading-provider' ? 'Loading video' : 'Buffering')}
+      {children ??
+        (state === 'loading-provider' ? 'Loading video' : 'Buffering')}
     </div>
   );
 };
