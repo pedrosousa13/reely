@@ -28,15 +28,31 @@ const expectMatchingRectangles = async (page: Page) => {
 test('keeps poster and viewport geometry stable before and after native activation', async ({
   page
 }) => {
-  await page.route('**/tracer.mp4', async (route) => route.abort());
-  await page.goto('/');
+  let releaseTracerRequest!: () => void;
+  const tracerRequestHeld = new Promise<void>((resolve) => {
+    releaseTracerRequest = resolve;
+  });
+  let recordHeldTracerRequest!: () => void;
+  const heldTracerRequest = new Promise<void>((resolve) => {
+    recordHeldTracerRequest = resolve;
+  });
+  await page.route('**/tracer.mp4', async (route) => {
+    recordHeldTracerRequest();
+    await tracerRequestHeld;
+    await route.continue();
+  });
+  await page.goto('/', { waitUntil: 'domcontentloaded' });
+  await heldTracerRequest;
 
   const beforeActivation = await rect(viewport(page));
   await expectMatchingRectangles(page);
+  await expect(poster(page)).toHaveAttribute('data-state', 'visible');
+  await expect(poster(page)).toHaveCSS('visibility', 'visible');
 
-  await page.unroute('**/tracer.mp4');
-  await page.reload();
+  releaseTracerRequest();
 
+  await expect(poster(page)).toHaveAttribute('data-state', 'hidden');
+  await expect(poster(page)).toHaveCSS('visibility', 'hidden');
   await expectMatchingRectangles(page);
   expect(await rect(viewport(page))).toEqual(beforeActivation);
 });
@@ -65,7 +81,7 @@ test('keeps poster geometry and focal position in Chromium fullscreen', async ({
 }) => {
   test.skip(
     browserName !== 'chromium',
-    'Fullscreen geometry is Chromium-only.'
+    'Task 3 fullscreen geometry coverage is Chromium-only.'
   );
   await page.goto('/');
 
