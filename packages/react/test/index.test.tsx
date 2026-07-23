@@ -9,7 +9,13 @@ import {
   screen,
   waitFor
 } from '@testing-library/react';
-import { createRef, startTransition, StrictMode, Suspense } from 'react';
+import {
+  createRef,
+  startTransition,
+  StrictMode,
+  Suspense,
+  useState
+} from 'react';
 import type * as React from 'react';
 import { renderToString } from 'react-dom/server';
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
@@ -1542,4 +1548,44 @@ test('forwards nativePoster only to native videos and server-renders poster mark
   expect(markup).toContain('srcSet="/server-2x.jpg 2x"');
   expect(markup).toContain('sizes="100vw"');
   expect(markup).toContain('alt=""');
+});
+
+test('tolerates an inline callback ref through unrelated parent re-renders', () => {
+  const observerInstances: unknown[] = [];
+  class ManualIntersectionObserver implements IntersectionObserver {
+    readonly root = null;
+    readonly rootMargin = '0px';
+    readonly scrollMargin = '0px';
+    readonly thresholds = [0];
+    constructor() {
+      observerInstances.push(this);
+    }
+    disconnect = () => undefined;
+    observe = () => undefined;
+    takeRecords = () => [];
+    unobserve = () => undefined;
+  }
+  vi.stubGlobal('IntersectionObserver', ManualIntersectionObserver);
+
+  const Harness = () => {
+    const [tick, setTick] = useState(0);
+    return (
+      <div>
+        <button onClick={() => setTick((value) => value + 1)}>tick</button>
+        <Player.Root loading="viewport" source="/clip.mp4">
+          <Player.Viewport data-tick={tick} ref={() => undefined}>
+            <Player.Media />
+          </Player.Viewport>
+        </Player.Root>
+      </div>
+    );
+  };
+
+  const { getByText } = render(<Harness />);
+  expect(() => {
+    fireEvent.click(getByText('tick'));
+    fireEvent.click(getByText('tick'));
+    fireEvent.click(getByText('tick'));
+  }).not.toThrow();
+  expect(observerInstances).toHaveLength(1);
 });
