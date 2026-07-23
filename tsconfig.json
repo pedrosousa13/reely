@@ -10,6 +10,8 @@
     { "path": "./packages/provider-hls/tsconfig.test.json" },
     { "path": "./packages/provider-youtube" },
     { "path": "./packages/provider-youtube/tsconfig.test.json" },
+    { "path": "./packages/provider-vimeo" },
+    { "path": "./packages/provider-vimeo/tsconfig.test.json" },
     { "path": "./packages/react" },
     { "path": "./packages/react/tsconfig.test.json" },
     { "path": "./apps/docs" },

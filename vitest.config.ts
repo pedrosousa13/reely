@@ -16,6 +16,9 @@ export default defineConfig({
       ),
       '@reely/provider-youtube': fileURLToPath(
         new URL('./packages/provider-youtube/src/index.ts', import.meta.url)
+      ),
+      '@reely/provider-vimeo': fileURLToPath(
+        new URL('./packages/provider-vimeo/src/index.ts', import.meta.url)
       )
     }
   },
