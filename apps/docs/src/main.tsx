@@ -1,40 +1,118 @@
+import { useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import * as Player from '@reely/react';
 
-const autoplayParameter = new URLSearchParams(window.location.search).get(
-  'autoplay'
-);
+const parameters = new URLSearchParams(window.location.search);
+const autoplayParameter = parameters.get('autoplay');
 const autoplay: Player.RootProps['autoplay'] =
   autoplayParameter === 'muted' || autoplayParameter === 'audible'
     ? autoplayParameter
     : false;
+const loadingParameter = parameters.get('loading');
+const loading: Player.PlayerLoadingStrategy =
+  loadingParameter === 'eager' ||
+  loadingParameter === 'interaction' ||
+  loadingParameter === 'viewport'
+    ? loadingParameter
+    : 'viewport';
+const preloadParameter = parameters.get('preload');
+const preload: Player.PlayerPreload =
+  preloadParameter === 'none' ||
+  preloadParameter === 'metadata' ||
+  preloadParameter === 'auto'
+    ? preloadParameter
+    : 'metadata';
+const defaultMuted = parameters.get('defaultMuted') === 'true';
+const sourceChange = parameters.get('sourceChange') === 'external';
+const activationSource = sourceChange
+  ? 'https://provider.invalid/source-a.mp4'
+  : parameters.get('activationSource') === 'external'
+    ? 'https://provider.invalid/tracer.mp4'
+    : '/tracer.mp4';
+const replacementSource = sourceChange
+  ? 'https://provider.invalid/source-b.mp4'
+  : null;
+
+const PlayerFixture = () => {
+  const [source, setSource] = useState(activationSource);
+
+  return (
+    <>
+      <Player.Root
+        autoplay={autoplay}
+        defaultMuted={defaultMuted}
+        loading={loading}
+        preload={preload}
+        source={source}
+      >
+        <Player.Viewport
+          data-testid="viewport"
+          style={{ aspectRatio: '16 / 9', maxWidth: '48rem', width: '100%' }}
+        >
+          <Player.Poster>
+            <Player.PosterImage
+              alt=""
+              decoding="async"
+              fetchPriority="high"
+              height={720}
+              loading="eager"
+              objectPosition="30% 40%"
+              sizes="(max-width: 48rem) 100vw, 48rem"
+              src="/poster.svg"
+              srcSet="/poster.svg 640w, /poster.svg 1280w"
+              width={1280}
+            />
+          </Player.Poster>
+          <Player.ActivationButton />
+          <Player.LoadingIndicator />
+          <Player.Media />
+        </Player.Viewport>
+        <Player.PlayButton />
+      </Player.Root>
+      {replacementSource && source !== replacementSource ? (
+        <button onClick={() => setSource(replacementSource)} type="button">
+          Switch to source B
+        </button>
+      ) : null}
+    </>
+  );
+};
 
 const App = () => (
   <>
     <h1>Reely</h1>
     <p>A minimal player with explicit, inspectable media source detection.</p>
-    <Player.Root autoplay={autoplay} source="/tracer.mp4">
-      <Player.Viewport
-        style={{ aspectRatio: '16 / 9', maxWidth: '48rem', width: '100%' }}
-      >
-        <Player.Poster>
-          <Player.PosterImage
-            alt=""
-            decoding="async"
-            fetchPriority="high"
-            height={720}
-            loading="eager"
-            objectPosition="30% 40%"
-            sizes="(max-width: 48rem) 100vw, 48rem"
-            src="/poster.svg"
-            srcSet="/poster.svg 640w, /poster.svg 1280w"
-            width={1280}
-          />
-        </Player.Poster>
-        <Player.Media />
-      </Player.Viewport>
-      <Player.PlayButton />
-    </Player.Root>
+    <PlayerFixture />
+    <h2>Activation loading</h2>
+    <p>
+      A poster&apos;s <code>loading</code> and <code>fetchPriority</code>{' '}
+      control only the image. Root <code>loading</code> controls provider
+      activation, while Root <code>preload</code> controls native media only
+      after activation.
+    </p>
+    <p>
+      Root defaults to viewport loading with a <code>200px 0px</code> viewport
+      margin. Interaction loading is incompatible with autoplay: it reports a
+      recoverable configuration error instead of importing a provider.
+    </p>
+    <p>
+      With interaction loading, there is no provider contact before the click.
+      That click queues playback with the user&apos;s current muted preference;
+      blocked audible playback remains blocked and is never silently retried as
+      muted. Source changes and Retry invalidate stale loading attempts.
+    </p>
+    <pre>{`<Player.Root
+  source={source}
+  loading="interaction"
+  preload="metadata"
+>
+  <Player.Viewport>
+    <Player.Media />
+    <Player.Poster>{poster}</Player.Poster>
+    <Player.ActivationButton />
+    <Player.LoadingIndicator />
+  </Player.Viewport>
+</Player.Root>`}</pre>
     <h2>Posters</h2>
     <p>
       The decorative <code>Player.Poster</code> sits inside the viewport before

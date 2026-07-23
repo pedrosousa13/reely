@@ -15,7 +15,7 @@
     "test:e2e": "pnpm --filter @reely/docs build && playwright test",
     "test:integrations": "pnpm --filter @reely/react build && pnpm --filter @reely/integration-next-image build && pnpm --filter @reely/integration-next-image test:integration",
     "test:packages": "pnpm --filter @reely/core build && pnpm --filter @reely/provider-native build && pnpm --filter @reely/react build",
-    "test:bundle": "node -e \"console.log('Bundle tests are a Task 5 placeholder.')\"",
+    "test:bundle": "pnpm --filter @reely/core build && pnpm --filter @reely/provider-native build && pnpm --filter @reely/react build && pnpm --filter @reely/bundle-native-only build && pnpm --filter @reely/bundle-native-only test",
     "build": "pnpm -r --if-present run build"
   },
   "devDependencies": {
