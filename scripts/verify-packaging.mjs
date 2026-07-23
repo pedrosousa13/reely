@@ -73,7 +73,7 @@ async function main() {
     // 2. Build and pack each package.
     for (const pkg of packages) {
       console.log(`\n--- Building ${pkg.name} ---`);
-      run('pnpm', ['--filter', pkg.name, 'build']);
+      run('pnpm', ['exec', 'turbo', 'run', 'build', '--filter', pkg.name]);
       console.log(`--- Packing ${pkg.name} ---`);
       run('pnpm', [
         '--filter',

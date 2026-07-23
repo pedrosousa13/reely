@@ -12,12 +12,12 @@
     "lint": "eslint . --ignore-pattern '**/.next/**'",
     "typecheck": "tsc -b",
     "test": "vitest run --passWithNoTests",
-    "test:e2e": "pnpm --filter @reely/docs build && playwright test",
+    "test:e2e": "turbo run build --filter=@reely/docs && playwright test",
     "test:storybook": "pnpm --filter @reely/storybook test",
-    "test:integrations": "pnpm --filter @reely/react build && pnpm --filter @reely/integration-next-image build && pnpm --filter @reely/integration-next-image test:integration",
+    "test:integrations": "turbo run build --filter=@reely/integration-next-image && pnpm --filter @reely/integration-next-image test:integration",
     "test:packages": "node scripts/verify-packaging.mjs",
-    "test:bundle": "pnpm --filter @reely/core build && pnpm --filter @reely/provider-native build && pnpm --filter @reely/provider-hls build && pnpm --filter @reely/provider-youtube build && pnpm --filter @reely/provider-vimeo build && pnpm --filter @reely/react build && pnpm --filter @reely/bundle-native-only build && pnpm --filter @reely/bundle-native-only test",
-    "build": "pnpm -r --if-present run build"
+    "test:bundle": "turbo run build --filter=@reely/bundle-native-only && pnpm --filter @reely/bundle-native-only test",
+    "build": "turbo run build"
   },
   "devDependencies": {
     "@arethetypeswrong/cli": "0.18.5",
@@ -35,6 +35,7 @@
     "happy-dom": "20.8.9",
     "prettier": "3.9.6",
     "publint": "0.3.22",
+    "turbo": "2.10.6",
     "typescript": "6.0.3",
     "typescript-eslint": "8.65.0",
     "vite": "8.1.5",

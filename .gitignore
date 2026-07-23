@@ -6,3 +6,4 @@ storybook-static/
 playwright-report/
 test-results/
 *.tsbuildinfo
+.turbo/
