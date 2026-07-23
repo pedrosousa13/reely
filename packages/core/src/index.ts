@@ -44,6 +44,15 @@ export type Availability =
 
 export type TimeRange = { readonly start: number; readonly end: number };
 
+// Normalized live status. `null` means the stream is not live or its liveness
+// is not yet known. Derived from provider/seekable data (infinite/unknown
+// duration, hls.js level info, a moving seekable window) — never from the
+// source URL or filename.
+export type PlayerLiveState = {
+  readonly isLive: boolean;
+  readonly atLiveEdge: boolean;
+} | null;
+
 export type PlayerProvider = 'native' | 'hls' | 'youtube' | 'vimeo';
 
 export type HlsEngine = 'native' | 'hls.js';
@@ -77,6 +86,7 @@ export type PlayerState = {
   readonly duration: number | null;
   readonly buffered: ReadonlyArray<TimeRange>;
   readonly seekable: ReadonlyArray<TimeRange>;
+  readonly live: PlayerLiveState;
   readonly muted: boolean;
   readonly volume: number;
   readonly playbackRate: number;
@@ -268,6 +278,7 @@ export const createInitialPlayerState = (): PlayerState =>
     duration: null,
     buffered: Object.freeze([]),
     seekable: Object.freeze([]),
+    live: null,
     muted: false,
     volume: 1,
     playbackRate: 1,
