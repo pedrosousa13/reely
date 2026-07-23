@@ -177,7 +177,7 @@ const YouTubeExample = () => (
       data-testid="youtube-example"
       style={{ aspectRatio: '16 / 9', maxWidth: '48rem', width: '100%' }}
     >
-      <Player.ActivationButton aria-label="Play YouTube example" />
+      <Player.ActivationButton aria-label="Watch YouTube example" />
       <Player.LoadingIndicator />
       <Player.Media />
     </Player.Viewport>
