@@ -5,10 +5,11 @@ import {
   type PlayerSource,
   type PlayerState
 } from '@reely/core';
+import type { NativePlaybackOptions } from '@reely/provider-native';
 import {
-  createNativeProvider,
-  type NativePlaybackOptions
-} from '@reely/provider-native';
+  useActivation,
+  type ActivationBindings
+} from './use-activation';
 import {
   createContext,
   isValidElement,
@@ -20,6 +21,7 @@ import {
   useRef,
   useState,
   useSyncExternalStore,
+  type ComponentPropsWithRef,
   type ComponentPropsWithoutRef,
   type CSSProperties,
   type ImgHTMLAttributes,
@@ -28,17 +30,16 @@ import {
   type Ref
 } from 'react';
 
-type PlayerContextValue = {
+type PlayerContextValue = ActivationBindings & {
   controller: PlayerController;
   source: ReturnType<typeof detectSource>;
-  registerMedia: (media: HTMLVideoElement | null) => void;
 };
 
 type SourceTransition = {
   readonly key: string;
 };
 
-export type ViewportProps = ComponentPropsWithoutRef<'div'>;
+export type ViewportProps = ComponentPropsWithRef<'div'>;
 
 export type PosterProps = ComponentPropsWithoutRef<'div'>;
 
@@ -106,7 +107,18 @@ export type PlayerHandle = Pick<
 
 export type PlayerActions = Omit<PlayerHandle, 'getState' | 'subscribe' | 'on'>;
 
-export type RootProps = NativePlaybackOptions & {
+export type {
+  PlayerLoadingStrategy,
+  PlayerPreload
+} from './use-activation';
+
+export type PlayerActivationProps = {
+  readonly loading?: import('./use-activation').PlayerLoadingStrategy;
+  readonly loadMargin?: string;
+  readonly preload?: import('./use-activation').PlayerPreload;
+};
+
+export type RootProps = NativePlaybackOptions & PlayerActivationProps & {
   readonly autoplay?: AutoplayMode;
   readonly children: ReactNode;
   readonly defaultMuted?: boolean;
@@ -258,6 +270,8 @@ export const Root = ({
   defaultPlaybackRate = 1,
   defaultVolume = 1,
   endTime,
+  loadMargin = '200px 0px',
+  loading = 'viewport',
   loop,
   muted,
   onMutedChange,
@@ -267,6 +281,7 @@ export const Root = ({
   ref,
   source,
   startTime,
+  preload = 'metadata',
   volume
 }: RootProps) => {
   const [controller] = useState(() => new PlayerController());
@@ -294,14 +309,6 @@ export const Root = ({
   const volumeChangeCallback = useRef(onVolumeChange);
   const playbackRateChangeCallback = useRef(onPlaybackRateChange);
   const autoplayConfiguration = useRef({ autoplay, muted });
-  const nativePlaybackOptions = useRef<NativePlaybackOptions>({
-    endTime,
-    loop,
-    startTime
-  });
-  const appliedNativePlaybackOptions = useRef<
-    NativePlaybackOptions | undefined
-  >(undefined);
   const pendingMuted = useRef<Reconciliation<boolean> | undefined>(undefined);
   const pendingVolume = useRef<Reconciliation<number> | undefined>(undefined);
   const pendingPlaybackRate = useRef<Reconciliation<number> | undefined>(
@@ -328,7 +335,6 @@ export const Root = ({
   volumeChangeCallback.current = onVolumeChange;
   playbackRateChangeCallback.current = onPlaybackRateChange;
   autoplayConfiguration.current = { autoplay, muted };
-  nativePlaybackOptions.current = { endTime, loop, startTime };
   /* eslint-enable react-hooks/refs */
 
   useImperativeHandle(ref, () => controller, [controller]);
@@ -469,98 +475,92 @@ export const Root = ({
     };
   }, [controller, reconcileMuted, reconcilePlaybackRate, reconcileVolume]);
 
-  const attachMedia = useCallback(
-    (
-      media: HTMLVideoElement | null,
-      mediaSourceTransition: SourceTransition | undefined
-    ) => {
-      const previousLoadedDataListener = loadedDataListener.current;
-      if (previousLoadedDataListener) {
-        previousLoadedDataListener.media.removeEventListener(
-          'loadeddata',
-          previousLoadedDataListener.listener
-        );
-        loadedDataListener.current = undefined;
-      }
-      providerSourceTransition.current = media
-        ? mediaSourceTransition
-        : undefined;
+  const detachPreparedMedia = useCallback(() => {
+    const listener = loadedDataListener.current;
+    if (listener) {
+      listener.media.removeEventListener('loadeddata', listener.listener);
+      loadedDataListener.current = undefined;
+    }
+    currentMedia.current = null;
+    providerSourceTransition.current = undefined;
+  }, []);
+
+  const prepareMedia = useCallback(
+    (media: HTMLVideoElement) => {
+      detachPreparedMedia();
+      currentMedia.current = media;
+      providerSourceTransition.current = sourceTransition;
       pendingMuted.current = undefined;
       pendingVolume.current = undefined;
       pendingPlaybackRate.current = undefined;
       supersededMuted.current.length = 0;
       supersededVolume.current.length = 0;
       supersededPlaybackRate.current.length = 0;
-      if (media) {
-        media.muted = controlledMuted.current ?? desiredMuted.current;
-        const nextVolume = controlledVolume.current ?? desiredVolume.current;
-        const nextPlaybackRate =
-          controlledPlaybackRate.current ?? desiredPlaybackRate.current;
-        if (Number.isFinite(nextVolume)) {
-          try {
-            media.volume = Math.min(1, Math.max(0, nextVolume));
-          } catch {
-            // Initial preference seeding must not escape the provider boundary.
-          }
-        }
-        if (Number.isFinite(nextPlaybackRate) && nextPlaybackRate > 0) {
-          try {
-            media.playbackRate = nextPlaybackRate;
-          } catch {
-            // Initial preference seeding must not escape the provider boundary.
-          }
-        }
-        ensurePreferenceSubscription();
-        controller.configureAutoplay(autoplayConfiguration.current.autoplay, {
-          controlledMuted: autoplayConfiguration.current.muted
-        });
-        const attachedSourceTransition = mediaSourceTransition!;
-        const onLoadedData = () => {
-          if (
-            currentMedia.current === media &&
-            providerSourceTransition.current === attachedSourceTransition
-          ) {
-            setHiddenTransition(attachedSourceTransition);
-          }
-        };
-        media.addEventListener('loadeddata', onLoadedData);
-        loadedDataListener.current = { media, listener: onLoadedData };
-        if (media.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA) {
-          onLoadedData();
+      media.muted = controlledMuted.current ?? desiredMuted.current;
+      const nextVolume = controlledVolume.current ?? desiredVolume.current;
+      const nextPlaybackRate =
+        controlledPlaybackRate.current ?? desiredPlaybackRate.current;
+      if (Number.isFinite(nextVolume)) {
+        try {
+          media.volume = Math.min(1, Math.max(0, nextVolume));
+        } catch {
+          // Initial preference seeding must not escape the provider boundary.
         }
       }
-      const options = nativePlaybackOptions.current;
-      appliedNativePlaybackOptions.current = media ? options : undefined;
-      controller.setProvider(
-        media ? createNativeProvider(media, options) : undefined
-      );
+      if (Number.isFinite(nextPlaybackRate) && nextPlaybackRate > 0) {
+        try {
+          media.playbackRate = nextPlaybackRate;
+        } catch {
+          // Initial preference seeding must not escape the provider boundary.
+        }
+      }
+      ensurePreferenceSubscription();
+      controller.configureAutoplay(autoplayConfiguration.current.autoplay, {
+        controlledMuted: autoplayConfiguration.current.muted
+      });
+      const attachedSourceTransition = sourceTransition;
+      const onLoadedData = () => {
+        if (
+          currentMedia.current === media &&
+          providerSourceTransition.current === attachedSourceTransition
+        ) {
+          setHiddenTransition(attachedSourceTransition);
+        }
+      };
+      media.addEventListener('loadeddata', onLoadedData);
+      loadedDataListener.current = { media, listener: onLoadedData };
+      if (media.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA) {
+        onLoadedData();
+      }
     },
-    [controller, ensurePreferenceSubscription]
+    [
+      controller,
+      detachPreparedMedia,
+      ensurePreferenceSubscription,
+      sourceTransition
+    ]
   );
 
+  const activation = useActivation({
+    autoplay,
+    controller,
+    loadMargin,
+    loading,
+    nativeOptions: { endTime, loop, startTime },
+    prepareMedia,
+    preload,
+    source: detectedSource
+  });
+  const registerActivationMedia = activation.registerMedia;
   const registerMedia = useCallback(
     (media: HTMLVideoElement | null) => {
-      if (
-        currentMedia.current === media &&
-        (media === null || controller.getState().provider !== null)
-      )
-        return;
-      currentMedia.current = media;
-      attachMedia(media, media ? sourceTransition : undefined);
+      if (!media) detachPreparedMedia();
+      registerActivationMedia(media);
     },
-    [attachMedia, controller, sourceTransition]
+    [detachPreparedMedia, registerActivationMedia]
   );
 
   useEffect(() => {
-    const media = currentMedia.current;
-    const mediaSourceTransition = providerSourceTransition.current;
-    if (
-      media &&
-      mediaSourceTransition &&
-      controller.getState().provider === null
-    ) {
-      attachMedia(media, mediaSourceTransition);
-    }
     const unsubscribePoster = controller.subscribe((state) => {
       if (state.playback === 'playing' && providerSourceTransition.current) {
         setHiddenTransition(providerSourceTransition.current);
@@ -570,31 +570,9 @@ export const Root = ({
       unsubscribePoster();
       preferenceUnsubscribe.current?.();
       preferenceUnsubscribe.current = undefined;
-      const listener = loadedDataListener.current;
-      if (listener) {
-        listener.media.removeEventListener('loadeddata', listener.listener);
-        loadedDataListener.current = undefined;
-      }
-      controller.setProvider(undefined);
+      detachPreparedMedia();
     };
-  }, [attachMedia, controller]);
-
-  useEffect(() => {
-    const media = currentMedia.current;
-    const mediaSourceTransition = providerSourceTransition.current;
-    const applied = appliedNativePlaybackOptions.current;
-    if (
-      !media ||
-      !mediaSourceTransition ||
-      !applied ||
-      (Object.is(applied.endTime, endTime) &&
-        Object.is(applied.loop, loop) &&
-        Object.is(applied.startTime, startTime))
-    ) {
-      return;
-    }
-    attachMedia(media, mediaSourceTransition);
-  }, [attachMedia, endTime, loop, startTime]);
+  }, [controller, detachPreparedMedia]);
 
   useEffect(() => {
     controller.configureAutoplay(autoplay, { controlledMuted: muted });
@@ -667,8 +645,13 @@ export const Root = ({
   }, [controller, playbackRate, reconcilePlaybackRate]);
 
   const value = useMemo(
-    () => ({ controller, source: detectedSource, registerMedia }),
-    [controller, detectedSource, registerMedia]
+    () => ({
+      controller,
+      source: detectedSource,
+      ...activation,
+      registerMedia
+    }),
+    [activation, controller, detectedSource, registerMedia]
   );
   const posterState =
     hiddenTransition === sourceTransition ? 'hidden' : 'visible';
@@ -682,15 +665,37 @@ export const Root = ({
   );
 };
 
-export const Viewport = ({ children, style, ...rest }: ViewportProps) => (
-  <div
-    {...rest}
-    data-reely-part="viewport"
-    style={{ ...style, position: 'relative', overflow: 'hidden' }}
-  >
-    {children}
-  </div>
-);
+const assignRef = <Value,>(
+  ref: Ref<Value> | undefined,
+  value: Value | null
+): void => {
+  if (typeof ref === 'function') {
+    ref(value);
+  } else if (ref) {
+    ref.current = value;
+  }
+};
+
+export const Viewport = ({ children, ref, style, ...rest }: ViewportProps) => {
+  const { registerViewport } = usePlayer();
+  const mergedRef = useCallback(
+    (node: HTMLDivElement | null) => {
+      assignRef(ref, node);
+      registerViewport(node);
+    },
+    [ref, registerViewport]
+  );
+  return (
+    <div
+      {...rest}
+      data-reely-part="viewport"
+      ref={mergedRef}
+      style={{ ...style, position: 'relative', overflow: 'hidden' }}
+    >
+      {children}
+    </div>
+  );
+};
 
 const sourceKey = (source: ReturnType<typeof detectSource>): string =>
   source.status === 'success'
@@ -698,8 +703,12 @@ const sourceKey = (source: ReturnType<typeof detectSource>): string =>
     : 'unsupported-source';
 
 export const Media = ({ nativePoster }: MediaProps) => {
-  const { registerMedia, source } = usePlayer();
-  if (source.status === 'failure' || source.source.type !== 'video') {
+  const { mediaEligible, preload, registerMedia, source } = usePlayer();
+  if (
+    !mediaEligible ||
+    source.status === 'failure' ||
+    source.source.type !== 'video'
+  ) {
     return null;
   }
 
@@ -710,7 +719,7 @@ export const Media = ({ nativePoster }: MediaProps) => {
       key={sourceKey(source)}
       poster={nativePoster}
       playsInline
-      preload="metadata"
+      preload={preload}
       ref={registerMedia}
       style={{ position: 'relative', zIndex: 0 }}
     >

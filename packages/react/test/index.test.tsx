@@ -12,12 +12,68 @@ import {
 import { createRef, startTransition, StrictMode, Suspense } from 'react';
 import type * as React from 'react';
 import { renderToString } from 'react-dom/server';
-import { afterEach, expect, test, vi } from 'vitest';
+import { afterEach, beforeEach, expect, test, vi } from 'vitest';
+import type { ProviderAdapter } from '@reely/core';
+import type { NativePlaybackOptions } from '@reely/provider-native';
 import * as Player from '../src/index';
+
+vi.mock('../src/provider-loaders', async () => {
+  const { createNativeProvider } = await import('@reely/provider-native');
+  return {
+    // Keep legacy provider assertions synchronous; activation.test.tsx covers
+    // the real Promise boundary and the loader's real async contract directly.
+    loadProvider: ({
+      media,
+      nativeOptions
+    }: {
+      media: HTMLVideoElement | null;
+      nativeOptions: NativePlaybackOptions;
+    }) => ({
+      then: (resolve: (adapter: ProviderAdapter) => void) => {
+        resolve(createNativeProvider(media!, nativeOptions));
+        return { catch: () => undefined };
+      }
+    })
+  };
+});
+
+class ImmediateIntersectionObserver {
+  readonly root = null;
+  readonly rootMargin = '200px 0px';
+  readonly thresholds = [0];
+  constructor(private callback: IntersectionObserverCallback) {}
+  disconnect = () => undefined;
+  observe = (target: Element) =>
+    this.callback(
+      [
+        {
+          boundingClientRect: target.getBoundingClientRect(),
+          intersectionRatio: 1,
+          intersectionRect: target.getBoundingClientRect(),
+          isIntersecting: true,
+          rootBounds: null,
+          target,
+          time: 0
+        }
+      ],
+      this as unknown as IntersectionObserver
+    );
+  takeRecords = () => [];
+  unobserve = () => undefined;
+}
+
+beforeEach(() => {
+  vi.stubGlobal('IntersectionObserver', ImmediateIntersectionObserver);
+});
+
+const LegacyRoot = ({ loading = 'eager', ...props }: Player.RootProps) => (
+  <Player.Root {...props} loading={loading} />
+);
 
 afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
+  vi.unstubAllGlobals();
 });
 
 const verifyReadonlyStateTypes = (
@@ -49,13 +105,13 @@ test('exposes playback preferences without accepting a playing prop', () => {
   const onPlaybackRateChange = vi.fn();
   const invalidRoot = (
     // @ts-expect-error Playback is confirmed state, not a controlled Root prop.
-    <Player.Root playing source="/tracer.mp4">
+    <LegacyRoot playing source="/tracer.mp4">
       <Player.Media />
-    </Player.Root>
+    </LegacyRoot>
   );
 
   render(
-    <Player.Root
+    <LegacyRoot
       defaultMuted
       defaultPlaybackRate={1.5}
       defaultVolume={0.4}
@@ -65,7 +121,7 @@ test('exposes playback preferences without accepting a playing prop', () => {
       source="/tracer.mp4"
     >
       <Player.Media />
-    </Player.Root>
+    </LegacyRoot>
   );
 
   const media = screen.getByLabelText<HTMLVideoElement>('Reely media');
@@ -89,7 +145,7 @@ test('keeps provider preferences and autoplay active after StrictMode effect rep
   });
   render(
     <StrictMode>
-      <Player.Root
+      <LegacyRoot
         autoplay="audible"
         onVolumeChange={onVolumeChange}
         ref={handle}
@@ -98,7 +154,7 @@ test('keeps provider preferences and autoplay active after StrictMode effect rep
       >
         <Player.Media />
         <Player.PlayButton />
-      </Player.Root>
+      </LegacyRoot>
     </StrictMode>
   );
   const media = screen.getByLabelText<HTMLVideoElement>('Reely media');
@@ -119,9 +175,9 @@ test('keeps provider preferences and autoplay active after StrictMode effect rep
 
 test('does not assign invalid controlled numeric preferences during media registration', () => {
   const player = (source: string) => (
-    <Player.Root playbackRate={0} source={source} volume={Number.NaN}>
+    <LegacyRoot playbackRate={0} source={source} volume={Number.NaN}>
       <Player.Media />
-    </Player.Root>
+    </LegacyRoot>
   );
   const { rerender } = render(player('/first.mp4'));
   const firstMedia = screen.getByLabelText<HTMLVideoElement>('Reely media');
@@ -138,13 +194,13 @@ test('does not assign invalid controlled numeric preferences during media regist
 
 test('clamps finite default volume and skips an invalid default rate on replacement', () => {
   const player = (source: string) => (
-    <Player.Root
+    <LegacyRoot
       defaultPlaybackRate={Number.POSITIVE_INFINITY}
       defaultVolume={-2}
       source={source}
     >
       <Player.Media />
-    </Player.Root>
+    </LegacyRoot>
   );
   const { rerender } = render(player('/first.mp4'));
   const firstMedia = screen.getByLabelText<HTMLVideoElement>('Reely media');
@@ -177,9 +233,9 @@ test.each([
         : { defaultPlaybackRate: value };
 
     render(
-      <Player.Root ref={handle} source="/tracer.mp4" {...preferences}>
+      <LegacyRoot ref={handle} source="/tracer.mp4" {...preferences}>
         <Player.Media />
-      </Player.Root>
+      </LegacyRoot>
     );
     const media = screen.getByLabelText<HTMLVideoElement>('Reely media');
 
@@ -195,14 +251,14 @@ test('seeds default preferences once and retains confirmed values across media r
     source: string,
     defaults: { muted: boolean; volume: number; playbackRate: number }
   ) => (
-    <Player.Root
+    <LegacyRoot
       defaultMuted={defaults.muted}
       defaultPlaybackRate={defaults.playbackRate}
       defaultVolume={defaults.volume}
       source={source}
     >
       <Player.Media />
-    </Player.Root>
+    </LegacyRoot>
   );
   const { rerender } = render(
     player('/first.mp4', { muted: true, volume: 0.4, playbackRate: 1.5 })
@@ -237,7 +293,7 @@ test('reconciles controlled preferences without reporting prop-driven confirmati
   const onVolumeChange = vi.fn();
   const onPlaybackRateChange = vi.fn();
   const player = (muted: boolean, volume: number, playbackRate: number) => (
-    <Player.Root
+    <LegacyRoot
       muted={muted}
       onMutedChange={onMutedChange}
       onPlaybackRateChange={onPlaybackRateChange}
@@ -247,7 +303,7 @@ test('reconciles controlled preferences without reporting prop-driven confirmati
       volume={volume}
     >
       <Player.Media />
-    </Player.Root>
+    </LegacyRoot>
   );
   const { rerender } = render(player(false, 0.7, 1.25));
   const media = screen.getByLabelText<HTMLVideoElement>('Reely media');
@@ -268,14 +324,14 @@ test('supersedes a delayed muted confirmation after a rapid controlled reversal'
   const onMutedChange = vi.fn();
   const handle = createRef<Player.PlayerHandle>();
   const player = (muted: boolean) => (
-    <Player.Root
+    <LegacyRoot
       muted={muted}
       onMutedChange={onMutedChange}
       ref={handle}
       source="/tracer.mp4"
     >
       <Player.Media />
-    </Player.Root>
+    </LegacyRoot>
   );
   const { rerender } = render(player(false));
   const media = screen.getByLabelText<HTMLVideoElement>('Reely media');
@@ -303,14 +359,14 @@ test('supersedes a delayed volume confirmation after a rapid controlled reversal
   const onVolumeChange = vi.fn();
   const handle = createRef<Player.PlayerHandle>();
   const player = (volume: number) => (
-    <Player.Root
+    <LegacyRoot
       onVolumeChange={onVolumeChange}
       ref={handle}
       source="/tracer.mp4"
       volume={volume}
     >
       <Player.Media />
-    </Player.Root>
+    </LegacyRoot>
   );
   const { rerender } = render(player(0.7));
   const media = screen.getByLabelText<HTMLVideoElement>('Reely media');
@@ -336,14 +392,14 @@ test('supersedes a delayed rate confirmation after a rapid controlled reversal',
   const onPlaybackRateChange = vi.fn();
   const handle = createRef<Player.PlayerHandle>();
   const player = (playbackRate: number) => (
-    <Player.Root
+    <LegacyRoot
       onPlaybackRateChange={onPlaybackRateChange}
       playbackRate={playbackRate}
       ref={handle}
       source="/tracer.mp4"
     >
       <Player.Media />
-    </Player.Root>
+    </LegacyRoot>
   );
   const { rerender } = render(player(1.25));
   const media = screen.getByLabelText<HTMLVideoElement>('Reely media');
@@ -374,14 +430,14 @@ test('clears retired volume targets when queued confirmations coalesce to the la
   });
   const handle = createRef<Player.PlayerHandle>();
   const player = (volume: number) => (
-    <Player.Root
+    <LegacyRoot
       onVolumeChange={onVolumeChange}
       ref={handle}
       source="/tracer.mp4"
       volume={volume}
     >
       <Player.Media />
-    </Player.Root>
+    </LegacyRoot>
   );
   const { rerender } = render(player(0.7));
   const media = screen.getByLabelText<HTMLVideoElement>('Reely media');
@@ -414,14 +470,14 @@ test('clears repeated retired rate targets after the latest active confirmation'
   });
   const handle = createRef<Player.PlayerHandle>();
   const player = (playbackRate: number) => (
-    <Player.Root
+    <LegacyRoot
       onPlaybackRateChange={onPlaybackRateChange}
       playbackRate={playbackRate}
       ref={handle}
       source="/tracer.mp4"
     >
       <Player.Media />
-    </Player.Root>
+    </LegacyRoot>
   );
   const { rerender } = render(player(1));
   const media = screen.getByLabelText<HTMLVideoElement>('Reely media');
@@ -456,14 +512,14 @@ test('clears retired muted targets when a reversal confirmation coalesces to cur
   });
   const handle = createRef<Player.PlayerHandle>();
   const player = (muted: boolean) => (
-    <Player.Root
+    <LegacyRoot
       muted={muted}
       onMutedChange={onMutedChange}
       ref={handle}
       source="/tracer.mp4"
     >
       <Player.Media />
-    </Player.Root>
+    </LegacyRoot>
   );
   const { rerender } = render(player(false));
   const media = screen.getByLabelText<HTMLVideoElement>('Reely media');
@@ -509,7 +565,7 @@ test('reports confirmed controlled conflicts before restoring controlled values'
     expect(value).toBe(confirmed.playbackRate);
   });
   render(
-    <Player.Root
+    <LegacyRoot
       muted={false}
       onMutedChange={onMutedChange}
       onPlaybackRateChange={onPlaybackRateChange}
@@ -519,7 +575,7 @@ test('reports confirmed controlled conflicts before restoring controlled values'
       volume={0.7}
     >
       <Player.Media />
-    </Player.Root>
+    </LegacyRoot>
   );
   const media = screen.getByLabelText<HTMLVideoElement>('Reely media');
 
@@ -551,10 +607,10 @@ test('keeps autoplay disabled by default', () => {
     .spyOn(HTMLMediaElement.prototype, 'play')
     .mockResolvedValue(undefined);
   render(
-    <Player.Root source="/tracer.mp4">
+    <LegacyRoot source="/tracer.mp4">
       <Player.Media />
       <Player.PlayButton />
-    </Player.Root>
+    </LegacyRoot>
   );
 
   confirmMetadataReady(screen.getByLabelText('Reely media'));
@@ -576,14 +632,14 @@ test('mutes before autoplay and reports attempting then confirmed started', asyn
     return Promise.resolve();
   });
   render(
-    <Player.Root
+    <LegacyRoot
       autoplay="muted"
       onMutedChange={onMutedChange}
       source="/tracer.mp4"
     >
       <Player.Media />
       <Player.PlayButton />
-    </Player.Root>
+    </LegacyRoot>
   );
   const media = screen.getByLabelText<HTMLVideoElement>('Reely media');
 
@@ -608,10 +664,10 @@ test('attempts audible autoplay without muting', async () => {
     return Promise.resolve();
   });
   render(
-    <Player.Root autoplay="audible" source="/tracer.mp4">
+    <LegacyRoot autoplay="audible" source="/tracer.mp4">
       <Player.Media />
       <Player.PlayButton />
-    </Player.Root>
+    </LegacyRoot>
   );
 
   confirmMetadataReady(screen.getByLabelText('Reely media'));
@@ -628,10 +684,10 @@ test.each([
 ])('reports %s autoplay attempts', async (state, error) => {
   vi.spyOn(HTMLMediaElement.prototype, 'play').mockRejectedValue(error);
   render(
-    <Player.Root autoplay="audible" source="/tracer.mp4">
+    <LegacyRoot autoplay="audible" source="/tracer.mp4">
       <Player.Media />
       <Player.PlayButton />
-    </Player.Root>
+    </LegacyRoot>
   );
 
   confirmMetadataReady(screen.getByLabelText('Reely media'));
@@ -654,10 +710,10 @@ test('keeps blocked autoplay focusable and retries only from a user-origin click
     });
   const handle = createRef<Player.PlayerHandle>();
   render(
-    <Player.Root autoplay="audible" ref={handle} source="/tracer.mp4">
+    <LegacyRoot autoplay="audible" ref={handle} source="/tracer.mp4">
       <Player.Media />
       <Player.PlayButton />
-    </Player.Root>
+    </LegacyRoot>
   );
   handle.current?.on('play', (event) => origins.push(event.origin));
   confirmMetadataReady(screen.getByLabelText('Reely media'));
@@ -680,7 +736,7 @@ test('reports the controlled-unmuted conflict without trying muted autoplay', ()
     .mockResolvedValue(undefined);
   const handle = createRef<Player.PlayerHandle>();
   render(
-    <Player.Root
+    <LegacyRoot
       autoplay="muted"
       muted={false}
       ref={handle}
@@ -688,7 +744,7 @@ test('reports the controlled-unmuted conflict without trying muted autoplay', ()
     >
       <Player.Media />
       <Player.PlayButton />
-    </Player.Root>
+    </LegacyRoot>
   );
 
   confirmMetadataReady(screen.getByLabelText('Reely media'));
@@ -710,10 +766,10 @@ test('keeps confirmed paused state when the media play command rejects', async (
 
   try {
     render(
-      <Player.Root source="video.mp4">
+      <LegacyRoot source="video.mp4">
         <Player.Media />
         <Player.PlayButton />
-      </Player.Root>
+      </LegacyRoot>
     );
 
     fireEvent.click(screen.getByRole('button', { name: 'Play' }));
@@ -732,7 +788,7 @@ test('keeps confirmed paused state when the media play command rejects', async (
 
 test('renders every explicit video source in order with its MIME type', () => {
   render(
-    <Player.Root
+    <LegacyRoot
       source={{
         type: 'video',
         sources: [
@@ -742,7 +798,7 @@ test('renders every explicit video source in order with its MIME type', () => {
       }}
     >
       <Player.Media />
-    </Player.Root>
+    </LegacyRoot>
   );
 
   const sources = screen
@@ -767,10 +823,10 @@ test.each([
   'resets confirmed playing state after a transition to %s',
   (_kind, source) => {
     const player = (playerSource: '/tracer.mp4' | typeof source) => (
-      <Player.Root source={playerSource}>
+      <LegacyRoot source={playerSource}>
         <Player.Media />
         <Player.PlayButton />
-      </Player.Root>
+      </LegacyRoot>
     );
     const { rerender } = render(player('/tracer.mp4'));
     const media = screen.getByLabelText('Reely media');
@@ -798,17 +854,19 @@ test('exposes stable actions and a ref handle backed by the Root controller', ()
     return null;
   };
   const player = () => (
-    <Player.Root ref={handle} source="/tracer.mp4">
+    <LegacyRoot ref={handle} source="/tracer.mp4">
       <Player.Media />
       <Probe />
-    </Player.Root>
+    </LegacyRoot>
   );
   const { rerender } = render(player());
 
   rerender(player());
 
-  expect(actionReferences).toHaveLength(2);
-  expect(actionReferences[0]).toBe(actionReferences[1]);
+  expect(actionReferences).toHaveLength(3);
+  expect(
+    actionReferences.every((actions) => actions === actionReferences[0])
+  ).toBe(true);
   expect(actionReferences[0]?.play).toBe(handle.current?.play);
   expect(handle.current?.getState().playback).toBe('paused');
   expect(handle.current).toMatchObject({
@@ -838,10 +896,10 @@ test('reads the same controller state through PlayerHandle and usePlayerState', 
     return null;
   };
   render(
-    <Player.Root ref={handle} source="/tracer.mp4">
+    <LegacyRoot ref={handle} source="/tracer.mp4">
       <Player.Media />
       <Probe />
-    </Player.Root>
+    </LegacyRoot>
   );
 
   fireEvent.play(screen.getByLabelText('Reely media'));
@@ -859,10 +917,10 @@ test('does not rerender a selector when an unrelated confirmed state changes', (
   };
 
   render(
-    <Player.Root source="/tracer.mp4">
+    <LegacyRoot source="/tracer.mp4">
       <Player.Media />
       <Volume />
-    </Player.Root>
+    </LegacyRoot>
   );
   const initialRenders = renders;
 
@@ -882,10 +940,10 @@ test('caches an object selector and isolates it from unrelated state changes', (
   };
 
   render(
-    <Player.Root source="/tracer.mp4">
+    <LegacyRoot source="/tracer.mp4">
       <Player.Media />
       <Volume />
-    </Player.Root>
+    </LegacyRoot>
   );
   const initialRenders = renders;
 
@@ -904,10 +962,10 @@ test('observes changes to enumerable symbol-key selector values', () => {
     return <output>{selection[volume]}</output>;
   };
   render(
-    <Player.Root source="/tracer.mp4">
+    <LegacyRoot source="/tracer.mp4">
       <Player.Media />
       <Volume />
-    </Player.Root>
+    </LegacyRoot>
   );
   const media = screen.getByLabelText<HTMLVideoElement>('Reely media');
   media.volume = 0.4;
@@ -925,9 +983,9 @@ test('reevaluates a changed selector when controller state is unchanged', () => 
     return <output>{selected}</output>;
   };
   const player = (selectPlayback: boolean) => (
-    <Player.Root source="/tracer.mp4">
+    <LegacyRoot source="/tracer.mp4">
       <Selection selectPlayback={selectPlayback} />
-    </Player.Root>
+    </LegacyRoot>
   );
   const { rerender } = render(player(false));
   expect(screen.getByText('1')).toBeDefined();
@@ -951,9 +1009,9 @@ test('passes loop and playback boundaries from Root to the native adapter', asyn
     .spyOn(HTMLMediaElement.prototype, 'play')
     .mockResolvedValue(undefined);
   render(
-    <Player.Root loop startTime={3} endTime={6} source="/tracer.mp4">
+    <LegacyRoot loop startTime={3} endTime={6} source="/tracer.mp4">
       <Player.Media />
-    </Player.Root>
+    </LegacyRoot>
   );
   const media = screen.getByLabelText<HTMLVideoElement>('Reely media');
 
@@ -967,66 +1025,15 @@ test('passes loop and playback boundaries from Root to the native adapter', asyn
   expect(play).toHaveBeenCalledOnce();
 });
 
-test('replaces the provider once when native playback options change', async () => {
-  const load = vi
-    .spyOn(HTMLMediaElement.prototype, 'load')
-    .mockImplementation(() => undefined);
-  const play = vi
-    .spyOn(HTMLMediaElement.prototype, 'play')
-    .mockImplementation(function (this: HTMLMediaElement) {
-      this.dispatchEvent(new Event('play'));
-      return Promise.resolve();
-    });
-  const handle = createRef<Player.PlayerHandle>();
-  const player = (startTime: number) => (
-    <Player.Root
-      autoplay="audible"
-      ref={handle}
-      source="/tracer.mp4"
-      startTime={startTime}
-    >
-      <Player.Media />
-      <Player.PlayButton />
-    </Player.Root>
-  );
-  const { rerender } = render(player(0));
-  const media = screen.getByLabelText<HTMLVideoElement>('Reely media');
-  confirmMetadataReady(media);
-  await waitFor(() => expect(play).toHaveBeenCalledOnce());
-  await waitFor(() => expect(load).toHaveBeenCalledOnce());
-  play.mockClear();
-  load.mockClear();
-  const providerStates: Array<string | null> = [];
-  const unsubscribe = handle.current?.subscribe((state) =>
-    providerStates.push(state.provider)
-  );
-  providerStates.length = 0;
-
-  rerender(player(1));
-  await waitFor(() => expect(play).toHaveBeenCalled());
-  await waitFor(() => expect(load).toHaveBeenCalled());
-  await new Promise((resolve) => setTimeout(resolve, 0));
-
-  expect(play).toHaveBeenCalledTimes(1);
-  expect(load).toHaveBeenCalledTimes(1);
-  expect(providerStates).toEqual(expect.arrayContaining(['native']));
-  expect(providerStates).not.toContain(null);
-  expect(handle.current?.getState()).toMatchObject({
-    provider: 'native',
-    autoplay: 'started'
-  });
-  unsubscribe?.();
-});
-
 test('attaches and loads one provider without detaching on source switch', async () => {
   const load = vi
     .spyOn(HTMLMediaElement.prototype, 'load')
     .mockImplementation(() => undefined);
   const handle = createRef<Player.PlayerHandle>();
   const player = (source: string) => (
-    <Player.Root ref={handle} source={source}>
+    <LegacyRoot ref={handle} source={source}>
       <Player.Media />
-    </Player.Root>
+    </LegacyRoot>
   );
   const { rerender } = render(player('/first.mp4'));
   await waitFor(() => expect(load).toHaveBeenCalledOnce());
@@ -1056,10 +1063,10 @@ test('destroys the previous native adapter and ignores its stale events on sourc
     'removeEventListener'
   );
   const player = (source: string) => (
-    <Player.Root source={source}>
+    <LegacyRoot source={source}>
       <Player.Media />
       <Player.PlayButton />
-    </Player.Root>
+    </LegacyRoot>
   );
   const { rerender } = render(player('/first.mp4'));
   const previousMedia = screen.getByLabelText('Reely media');
@@ -1302,6 +1309,30 @@ test('hides the poster only for confirmed playback or the current media frame', 
   expect(poster.getAttribute('data-state')).toBe('hidden');
 });
 
+test('detached media loadeddata cannot hide the poster', () => {
+  const { Poster } = posterPrimitives;
+  const player = (showMedia: boolean) => (
+    <Player.Root source="/clip.mp4">
+      <Player.Viewport>
+        {showMedia ? <Player.Media /> : null}
+        <Poster>
+          <span>Detached media poster</span>
+        </Poster>
+      </Player.Viewport>
+    </Player.Root>
+  );
+  const { rerender } = render(player(true));
+  const detachedMedia = screen.getByLabelText('Reely media');
+  const poster = screen.getByText('Detached media poster').parentElement!;
+  expect(poster.getAttribute('data-state')).toBe('visible');
+
+  rerender(player(false));
+  expect(screen.queryByLabelText('Reely media')).toBeNull();
+  fireEvent.loadedData(detachedMedia);
+
+  expect(poster.getAttribute('data-state')).toBe('visible');
+});
+
 test('shows the poster synchronously for every A to B to A source transition', () => {
   const { Poster } = posterPrimitives;
   const player = (source: string) => (
@@ -1424,9 +1455,9 @@ test('forwards nativePoster only to native videos and server-renders poster mark
     source: Player.RootProps['source'],
     nativePoster?: string
   ) => (
-    <Player.Root source={source}>
+    <LegacyRoot source={source}>
       <Player.Media nativePoster={nativePoster} />
-    </Player.Root>
+    </LegacyRoot>
   );
   const { rerender } = render(player('/clip.mp4', '/fallback.jpg'));
 
