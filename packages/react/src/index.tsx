@@ -1249,6 +1249,7 @@ export const SeekSlider = ({ children, style, ...props }: SeekSliderProps) => {
           if (Number.isFinite(next)) void controller.seekTo(next);
         }}
         step={1}
+        style={{ width: '100%', minHeight: 44 }}
         type="range"
         value={value}
       />
@@ -1262,9 +1263,10 @@ export type TimeProps = ComponentPropsWithRef<'time'> & {
 };
 
 export const Time = ({ children, type = 'current', ...props }: TimeProps) => {
-  const { currentTime, duration } = usePlayerState((state) => ({
+  const { currentTime, duration, provider } = usePlayerState((state) => ({
     currentTime: state.currentTime,
-    duration: state.duration
+    duration: state.duration,
+    provider: state.provider
   }));
   const hasDuration = typeof duration === 'number' && Number.isFinite(duration);
   const seconds =
@@ -1285,7 +1287,9 @@ export const Time = ({ children, type = 'current', ...props }: TimeProps) => {
     <time
       {...props}
       dateTime={`PT${Math.max(0, Math.floor(seconds))}S`}
+      data-provider={provider ?? undefined}
       data-reely-part="time"
+      data-state={hasDuration ? 'timed' : 'untimed'}
       data-time-type={type}
     >
       {children ?? display}
@@ -1434,6 +1438,8 @@ export const Controls = ({
     fullscreen,
     fullscreenStatus,
     muted,
+    pipStatus,
+    provider,
     seekStatus,
     volume,
     volumeStatus
@@ -1441,6 +1447,8 @@ export const Controls = ({
     fullscreen: state.fullscreen,
     fullscreenStatus: state.capabilities.fullscreen.status,
     muted: state.muted,
+    pipStatus: state.capabilities.pictureInPicture.status,
+    provider: state.provider,
     seekStatus: state.capabilities.seek.status,
     volume: state.volume,
     volumeStatus: state.capabilities.setVolume.status
@@ -1448,6 +1456,11 @@ export const Controls = ({
   const { controller } = usePlayer();
   const containerRef = useRef<HTMLDivElement | null>(null);
   const hadFocusWithin = useRef(false);
+  // Signature of the capabilities that gate whether a child control is
+  // rendered. Focus restoration keys off changes here so it fires only on a
+  // capability transition (a gated control appearing or disappearing) and
+  // never on unrelated state ticks like currentTime.
+  const gatedSignature = `${seekStatus}|${volumeStatus}|${fullscreenStatus}|${pipStatus}`;
 
   const handleShortcut = useCallback(
     (event: ShortcutEvent) => {
@@ -1542,14 +1555,17 @@ export const Controls = ({
 
   // Keep focus inside the player region: when a capability-gated control
   // unmounts while focused, the browser drops focus to <body>. Restore it to
-  // the region so keyboard users never lose their place.
+  // the region so keyboard users never lose their place. Scoping to
+  // `gatedSignature` ensures this reacts only to a control appearing or
+  // disappearing, so an outside click that drops focus to <body> is never
+  // re-stolen on the next unrelated render.
   useEffect(() => {
     const node = containerRef.current;
     if (!node) return;
     if (hadFocusWithin.current && document.activeElement === document.body) {
       node.focus();
     }
-  });
+  }, [gatedSignature]);
 
   const setRef = useCallback(
     (node: HTMLDivElement | null) => {
@@ -1563,7 +1579,9 @@ export const Controls = ({
     <div
       {...props}
       aria-label={ariaLabel ?? 'Video player controls'}
+      data-provider={provider ?? undefined}
       data-reely-part="controls"
+      data-state={global ? 'global' : 'scoped'}
       onBlur={(event) => {
         onBlur?.(event);
         const next = event.relatedTarget as Node | null;

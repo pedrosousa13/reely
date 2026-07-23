@@ -286,6 +286,12 @@ describe('SeekSlider', () => {
     expect(ranges[1]!.style.left).toBe('40%');
     expect(ranges[1]!.style.width).toBe('20%');
   });
+
+  test('gives the scrubber input a 44px default target', () => {
+    renderWithPlayer(<Player.SeekSlider />, seekReady());
+    const slider = screen.getByRole('slider', { name: 'Seek' });
+    expect((slider as HTMLInputElement).style.minHeight).toBe('44px');
+  });
 });
 
 describe('Time', () => {
@@ -295,6 +301,23 @@ describe('Time', () => {
     expect(time.tagName).toBe('TIME');
     expect(attr(time, 'data-reely-part')).toBe('time');
     expect(attr(time, 'data-time-type')).toBe('current');
+  });
+
+  test('exposes stable state and provider attributes', () => {
+    renderWithPlayer(<Player.Time />, {
+      currentTime: 75,
+      duration: 100,
+      provider: 'native'
+    });
+    const time = screen.getByText('1:15');
+    expect(attr(time, 'data-state')).toBe('timed');
+    expect(attr(time, 'data-provider')).toBe('native');
+  });
+
+  test('reports an untimed state when the duration is unknown', () => {
+    renderWithPlayer(<Player.Time />, { currentTime: 0, duration: null });
+    const time = screen.getByText('0:00');
+    expect(attr(time, 'data-state')).toBe('untimed');
   });
 
   test('formats the duration', () => {
@@ -410,6 +433,29 @@ describe('Controls container and scoped shortcuts', () => {
     );
     const region = container.querySelector('[data-reely-part="controls"]');
     expect(region).not.toBeNull();
+  });
+
+  test('exposes stable state and provider attributes', () => {
+    const { container } = renderWithPlayer(
+      <Player.Controls>
+        <Player.PlayButton />
+      </Player.Controls>,
+      controlsState({ provider: 'native' })
+    );
+    const region = container.querySelector('[data-reely-part="controls"]');
+    expect(attr(region, 'data-state')).toBe('scoped');
+    expect(attr(region, 'data-provider')).toBe('native');
+  });
+
+  test('reports a global shortcut scope through data-state', () => {
+    const { container } = renderWithPlayer(
+      <Player.Controls global>
+        <Player.PlayButton />
+      </Player.Controls>,
+      controlsState()
+    );
+    const region = container.querySelector('[data-reely-part="controls"]');
+    expect(attr(region, 'data-state')).toBe('global');
   });
 
   test('Space and K toggle playback when the region is focused', () => {
@@ -535,5 +581,29 @@ describe('Controls container and scoped shortcuts', () => {
     )!;
     await waitFor(() => expect(document.activeElement).toBe(region));
     expect(document.activeElement).not.toBe(document.body);
+  });
+
+  test('does not re-steal focus after an outside click drops focus to body', () => {
+    const { container, emit } = renderWithPlayer(
+      <Player.Controls>
+        <Player.FullscreenButton />
+      </Player.Controls>,
+      controlsState({ fullscreen: false })
+    );
+    const button = screen.getByRole('button', { name: 'Enter fullscreen' });
+    button.focus();
+    expect(document.activeElement).toBe(button);
+    // Clicking empty page area drops focus to <body> with no capability change.
+    button.blur();
+    expect(document.activeElement).toBe(document.body);
+    // Frequent non-capability ticks (volume, currentTime) must not yank focus
+    // back into the region.
+    emit({ volume: 0.6 });
+    emit({ currentTime: 31 });
+    const region = container.querySelector<HTMLElement>(
+      '[data-reely-part="controls"]'
+    )!;
+    expect(document.activeElement).toBe(document.body);
+    expect(document.activeElement).not.toBe(region);
   });
 });
