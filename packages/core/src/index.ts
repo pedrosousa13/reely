@@ -746,7 +746,10 @@ export class PlayerController {
       listener(event as PlayerEventFor<Type>);
     listeners.add(keyedListener);
     this.#eventListeners.set(type, listeners);
-    return () => listeners.delete(keyedListener);
+    return () => {
+      listeners.delete(keyedListener);
+      if (listeners.size === 0) this.#eventListeners.delete(type);
+    };
   };
 
   play = (): Promise<CommandResult> => this.playWithOrigin('api');
