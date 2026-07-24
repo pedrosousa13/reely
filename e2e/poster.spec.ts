@@ -29,6 +29,7 @@ const ignoredSourceDirectories = new Set([
   'dist',
   'generated',
   'node_modules',
+  'storybook-static',
   'test'
 ]);
 const isIgnoredSourceEntry = (entry: Dirent): boolean =>
