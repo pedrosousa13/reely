@@ -1745,3 +1745,5 @@ export const Controls = ({
     </div>
   );
 };
+
+export * from './icons.js';
