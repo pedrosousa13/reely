@@ -1083,7 +1083,12 @@ test('server-renders interaction control without media or loading work', () => {
   expect(markup).toContain('aria-label="Play video"');
   expect(markup).toContain('data-reely-part="poster"');
   expect(markup).not.toContain('<video');
-  expect(markup).not.toContain('data-reely-part="loading-indicator"');
+  // The live region ships (empty/idle) so buffering can be announced later,
+  // but no loading work has started and nothing is announced.
+  expect(markup).toContain('data-reely-part="loading-indicator"');
+  expect(markup).toContain('data-state="idle"');
+  expect(markup).not.toContain('Loading video');
+  expect(markup).not.toContain('Buffering');
   expect(mockedLoadProvider).not.toHaveBeenCalled();
 });
 
@@ -1237,6 +1242,30 @@ test('configuration-error activation becomes actionable after configuration is v
   await vi.waitFor(() => expect(mockedLoadProvider).toHaveBeenCalledOnce());
 });
 
+test('LoadingIndicator keeps a persistent live region so buffering is announced', async () => {
+  const fake = createFakeProvider();
+  mockedLoadProvider.mockResolvedValue(fake.adapter);
+  render(interactionFixture());
+  fireEvent.click(screen.getByRole('button', { name: 'Play video' }));
+  await vi.waitFor(() => expect(fake.counts().attachCount).toBe(1));
+  act(() =>
+    fake.emit({ activation: 'ready', lifecycle: 'ready', buffering: false })
+  );
+
+  // The live region exists and is empty before buffering starts, so the later
+  // content change is announced instead of mounting already-populated.
+  const region = screen.getByRole('status');
+  expect(region.dataset.state).toBe('idle');
+  expect(region.textContent).toBe('');
+
+  act(() => fake.emit({ buffering: true }));
+
+  // Same node, now populated — an announced change, not a fresh mount.
+  expect(screen.getByRole('status')).toBe(region);
+  expect(region.dataset.state).toBe('buffering');
+  expect(region.textContent).toBe('Buffering');
+});
+
 test('LoadingIndicator suppresses buffering after a terminal activation error', async () => {
   const fake = createFakeProvider();
   mockedLoadProvider.mockResolvedValue(fake.adapter);
@@ -1252,7 +1281,11 @@ test('LoadingIndicator suppresses buffering after a terminal activation error', 
     })
   );
 
-  expect(screen.queryByRole('status')).toBeNull();
+  // The live region stays mounted but must not announce buffering once the
+  // activation has terminally errored.
+  const region = screen.getByRole('status');
+  expect(region.dataset.state).toBe('idle');
+  expect(region.textContent).toBe('');
   expect(
     screen.getByRole('button', { name: 'Retry loading video' })
   ).toBeDefined();

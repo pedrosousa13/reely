@@ -213,8 +213,12 @@ test('renders no Reely control layer over a ready YouTube embed', async () => {
   await waitFor(() => {
     expect(document.querySelector('[data-reely-part="activation"]')).toBeNull();
   });
-  expect(
-    document.querySelector('[data-reely-part="loading-indicator"]')
-  ).toBeNull();
+  // The live region persists (for announcements) but is idle and empty over a
+  // ready embed — no active loading layer.
+  const loadingIndicator = document.querySelector(
+    '[data-reely-part="loading-indicator"]'
+  );
+  expect(loadingIndicator?.getAttribute('data-state')).toBe('idle');
+  expect(loadingIndicator?.textContent).toBe('');
   expect(document.querySelector('[data-reely-part="media"]')).not.toBeNull();
 });

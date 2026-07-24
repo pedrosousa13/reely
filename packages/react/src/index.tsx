@@ -985,19 +985,21 @@ export const LoadingIndicator = ({
     activation: state.activation,
     buffering: state.buffering
   }));
-  const state =
+  const active =
     activation === 'loading-provider'
       ? 'loading-provider'
       : activation !== 'error' && buffering
         ? 'buffering'
         : null;
-  if (!state) return null;
+  // The live region stays mounted (empty when idle) so a screen reader
+  // announces the buffering/loading transition. A region that mounts already
+  // populated is typically not announced.
   return (
     <div
       {...props}
       aria-live="polite"
       data-reely-part="loading-indicator"
-      data-state={state}
+      data-state={active ?? 'idle'}
       role="status"
       style={{
         ...style,
@@ -1007,8 +1009,10 @@ export const LoadingIndicator = ({
         pointerEvents: 'none'
       }}
     >
-      {children ??
-        (state === 'loading-provider' ? 'Loading video' : 'Buffering')}
+      {active
+        ? (children ??
+          (active === 'loading-provider' ? 'Loading video' : 'Buffering'))
+        : null}
     </div>
   );
 };
