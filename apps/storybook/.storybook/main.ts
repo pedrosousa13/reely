@@ -1,5 +1,6 @@
 import { fileURLToPath, URL } from 'node:url';
 import type { StorybookConfig } from '@storybook/react-vite';
+import remarkGfm from 'remark-gfm';
 import type { PluginOption } from 'vite';
 
 /**
@@ -27,7 +28,17 @@ const config: StorybookConfig = {
   stories: ['../stories/**/*.mdx', '../stories/**/*.stories.tsx'],
   addons: [
     '@storybook/addon-a11y',
-    '@storybook/addon-docs',
+    {
+      name: '@storybook/addon-docs',
+      options: {
+        // Enable GFM so MDX tables (e.g. the capabilities matrix) render.
+        mdxPluginOptions: {
+          mdxCompileOptions: {
+            remarkPlugins: [remarkGfm]
+          }
+        }
+      }
+    },
     '@storybook/addon-vitest'
   ],
   framework: '@storybook/react-vite',
