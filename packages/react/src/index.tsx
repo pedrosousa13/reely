@@ -7,6 +7,7 @@ import {
   type MediaMetadataInput,
   type MediaSessionBinding,
   type MediaSessionLike,
+  type PlayerError,
   type PlayerSource,
   type PlayerState,
   type TimeRange
@@ -1053,6 +1054,78 @@ export const LoadingIndicator = ({
         ? (children ??
           (active === 'loading-provider' ? 'Loading video' : 'Buffering'))
         : null}
+    </div>
+  );
+};
+
+/**
+ * Render-prop context handed to `ErrorDisplay` children. `retry` is `null`
+ * when the current error is not recoverable, so custom renderers stay
+ * capability-aware — a retry action is never offered where the provider has
+ * nothing to retry.
+ */
+export type ErrorDisplayRenderProps = {
+  readonly error: PlayerError;
+  readonly retry: (() => void) | null;
+};
+
+export type ErrorDisplayProps = Omit<
+  ComponentPropsWithRef<'div'>,
+  'children'
+> & {
+  readonly children?: (context: ErrorDisplayRenderProps) => ReactNode;
+};
+
+export const ErrorDisplay = ({
+  children,
+  style,
+  ...props
+}: ErrorDisplayProps) => {
+  const { error, provider } = usePlayerState((state) => ({
+    error: state.error,
+    provider: state.provider
+  }));
+  const { controller } = usePlayer();
+  if (!error) return null;
+  // `recoverable` is the state-level signal that the provider offers a retry.
+  // Absent — not disabled — when it does not (issue #34 capability rule).
+  const retry = error.recoverable
+    ? () => {
+        void controller.retry();
+      }
+    : null;
+
+  return (
+    <div
+      {...props}
+      data-provider={provider ?? undefined}
+      data-reely-part="error"
+      data-state={error.category}
+      role="alert"
+      style={{
+        ...style,
+        position: 'absolute',
+        inset: 0,
+        zIndex: 40
+      }}
+    >
+      {children ? (
+        children({ error, retry })
+      ) : (
+        <>
+          <p data-reely-part="error-message">{error.message}</p>
+          {retry && (
+            <button
+              data-reely-part="error-retry"
+              onClick={retry}
+              style={controlTargetStyle}
+              type="button"
+            >
+              Retry
+            </button>
+          )}
+        </>
+      )}
     </div>
   );
 };
