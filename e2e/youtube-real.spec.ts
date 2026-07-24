@@ -10,7 +10,7 @@ test(
     test.setTimeout(60_000);
 
     await page.goto(
-      '/iframe.html?id=fixtures-playerfixture--default&viewMode=story&loading=interaction&activationSource=youtube'
+      '/iframe.html?id=fixtures-playerfixture--interaction-youtube&viewMode=story'
     );
     const activationButton = page.getByRole('button', { name: 'Play video' });
     await expect(activationButton).toBeVisible();

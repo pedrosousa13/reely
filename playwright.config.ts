@@ -10,7 +10,7 @@ export default defineConfig({
   webServer: {
     command:
       'pnpm --filter @reely/storybook exec storybook dev --ci --no-open -p 4173 --host 127.0.0.1',
-    url: 'http://127.0.0.1:4173/iframe.html?id=fixtures-playerfixture--default&viewMode=story',
+    url: 'http://127.0.0.1:4173/iframe.html?id=fixtures-playerfixture--native-mp-4&viewMode=story',
     gracefulShutdown: { signal: 'SIGTERM', timeout: 500 },
     reuseExistingServer: !process.env.CI,
     timeout: 120_000

@@ -4,7 +4,7 @@ test('plays, pauses, and ends an MP4 with confirmed native states', async ({
   page
 }) => {
   await page.goto(
-    '/iframe.html?id=fixtures-playerfixture--default&viewMode=story'
+    '/iframe.html?id=fixtures-playerfixture--native-mp-4&viewMode=story'
   );
 
   await page.getByRole('button', { name: 'Play' }).click();

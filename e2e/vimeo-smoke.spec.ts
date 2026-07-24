@@ -49,7 +49,7 @@ test(
   async ({ page }) => {
     test.setTimeout(120_000);
     await page.goto(
-      '/iframe.html?id=fixtures-playerfixture--default&viewMode=story&source=vimeo&loading=interaction&defaultMuted=true'
+      '/iframe.html?id=fixtures-playerfixture--vimeo-interaction-muted&viewMode=story'
     );
     const activation = page.getByRole('button', { name: 'Play video' });
     await activation.waitFor();
@@ -105,9 +105,8 @@ test(
   { tag: '@real' },
   async ({ page }) => {
     test.setTimeout(120_000);
-    const source = encodeURIComponent('https://vimeo.com/22439234');
     await page.goto(
-      `/iframe.html?id=fixtures-playerfixture--default&viewMode=story&source=${source}&loading=interaction`
+      '/iframe.html?id=fixtures-playerfixture--vimeo-free-plan&viewMode=story'
     );
     await page.getByRole('button', { name: 'Play video' }).click();
     await expect
@@ -121,9 +120,8 @@ test(
   { tag: '@real' },
   async ({ page }) => {
     test.setTimeout(120_000);
-    const source = encodeURIComponent('https://vimeo.com/1123898957');
     await page.goto(
-      `/iframe.html?id=fixtures-playerfixture--default&viewMode=story&source=${source}&loading=interaction`
+      '/iframe.html?id=fixtures-playerfixture--vimeo-paid-plan&viewMode=story'
     );
     await page.getByRole('button', { name: 'Play video' }).click();
     await expect

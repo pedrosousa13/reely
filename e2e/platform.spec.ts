@@ -65,7 +65,7 @@ test('platform capability reporting matches what the browser supports', async ({
   page
 }) => {
   await page.goto(
-    '/iframe.html?id=fixtures-playerfixture--default&viewMode=story',
+    '/iframe.html?id=fixtures-playerfixture--native-mp-4&viewMode=story',
     { waitUntil: 'domcontentloaded' }
   );
   await awaitCapabilityResolution(page);
@@ -93,7 +93,7 @@ test('platform AirPlay capability is WebKit-only and gates the picker control', 
   // The AirPlay demo control is gated behind ?airplay=demo so it never adds a
   // second page-global "Play"-named button to the default fixture.
   await page.goto(
-    '/iframe.html?id=fixtures-playerfixture--default&viewMode=story&airplay=demo',
+    '/iframe.html?id=fixtures-playerfixture--airplay-demo&viewMode=story',
     { waitUntil: 'domcontentloaded' }
   );
   await awaitCapabilityResolution(page);
@@ -126,7 +126,7 @@ test('platform capability gating shows presentation controls only when available
   page
 }) => {
   await page.goto(
-    '/iframe.html?id=fixtures-playerfixture--default&viewMode=story',
+    '/iframe.html?id=fixtures-playerfixture--native-mp-4&viewMode=story',
     { waitUntil: 'domcontentloaded' }
   );
   await awaitCapabilityResolution(page);
@@ -166,7 +166,7 @@ test('platform fullscreen commands confirm state through fullscreenchange', asyn
     'Programmatic fullscreen coverage is Chromium-only; Safari and iOS run in the manual device matrix.'
   );
   await page.goto(
-    '/iframe.html?id=fixtures-playerfixture--default&viewMode=story',
+    '/iframe.html?id=fixtures-playerfixture--native-mp-4&viewMode=story',
     { waitUntil: 'domcontentloaded' }
   );
   await awaitCapabilityResolution(page);

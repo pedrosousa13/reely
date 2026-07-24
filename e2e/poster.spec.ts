@@ -67,7 +67,7 @@ test('keeps poster and viewport geometry stable before and after native activati
     await route.continue();
   });
   await page.goto(
-    '/iframe.html?id=fixtures-playerfixture--default&viewMode=story',
+    '/iframe.html?id=fixtures-playerfixture--native-mp-4&viewMode=story',
     { waitUntil: 'domcontentloaded' }
   );
   await heldTracerRequest;
@@ -90,7 +90,7 @@ test('preserves the documented focal position through landscape and portrait lay
 }) => {
   await page.setViewportSize({ width: 1280, height: 720 });
   await page.goto(
-    '/iframe.html?id=fixtures-playerfixture--default&viewMode=story'
+    '/iframe.html?id=fixtures-playerfixture--native-mp-4&viewMode=story'
   );
 
   await expect(posterImage(page)).toHaveCSS('object-position', '30% 40%');
@@ -114,7 +114,7 @@ test('keeps poster geometry and focal position in Chromium fullscreen', async ({
     'Task 3 fullscreen geometry coverage is Chromium-only.'
   );
   await page.goto(
-    '/iframe.html?id=fixtures-playerfixture--default&viewMode=story'
+    '/iframe.html?id=fixtures-playerfixture--native-mp-4&viewMode=story'
   );
 
   await viewport(page).evaluate((element) => {
@@ -140,7 +140,7 @@ test('hides the poster after the first frame without changing its geometry', asy
   page
 }) => {
   await page.goto(
-    '/iframe.html?id=fixtures-playerfixture--default&viewMode=story'
+    '/iframe.html?id=fixtures-playerfixture--native-mp-4&viewMode=story'
   );
   const visibleGeometry = await rect(poster(page));
 

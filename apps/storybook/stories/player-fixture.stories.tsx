@@ -11,24 +11,14 @@ declare global {
 const youtubeExampleUrl = 'https://www.youtube.com/watch?v=M7lc1UVf-VE';
 const vimeoExampleUrl = 'https://vimeo.com/76979871';
 
-/**
- * Storybook's `?args=k:v;...` URL parser drops values containing a literal
- * `.` (e.g. `hls.js`) and boolean-coerces args that default to `false`
- * (autoplay), so e2e specs can't reliably drive this fixture through args.
- * Instead, the fixture reads `window.location.search` directly at render
- * time, mirroring the `apps/docs` `PlayerFixture`'s `URLSearchParams` reads
- * one-for-one (see `apps/docs/src/main.tsx`). The `argTypes`/`Default.args`
- * below remain only as manager-UI documentation/defaults; they do not drive
- * the rendered props.
- */
-type PlayerFixtureArgs = {
+type PlayerFixtureProps = {
   readonly source?: string;
-  readonly engine: 'auto' | 'native' | 'hls.js';
+  readonly engine?: 'auto' | 'native' | 'hls.js';
   readonly activationSource?: 'youtube' | 'external';
-  readonly autoplay: Player.RootProps['autoplay'];
-  readonly loading: Player.PlayerLoadingStrategy;
-  readonly preload: Player.PlayerPreload;
-  readonly defaultMuted: boolean;
+  readonly autoplay?: Player.RootProps['autoplay'];
+  readonly loading?: Player.PlayerLoadingStrategy;
+  readonly preload?: Player.PlayerPreload;
+  readonly defaultMuted?: boolean;
   readonly airplay?: 'demo';
   readonly sourceChange?: 'external';
 };
@@ -218,59 +208,47 @@ const LiveControls = () => {
   );
 };
 
-const PlayerFixture = () => {
-  const parameters = new URLSearchParams(window.location.search);
-  const autoplayParameter = parameters.get('autoplay');
-  const autoplay: Player.RootProps['autoplay'] =
-    autoplayParameter === 'muted' || autoplayParameter === 'audible'
-      ? autoplayParameter
-      : false;
-  const loadingParameter = parameters.get('loading');
-  const loading: Player.PlayerLoadingStrategy =
-    loadingParameter === 'eager' ||
-    loadingParameter === 'interaction' ||
-    loadingParameter === 'viewport'
-      ? loadingParameter
-      : 'viewport';
-  const preloadParameter = parameters.get('preload');
-  const preload: Player.PlayerPreload =
-    preloadParameter === 'none' ||
-    preloadParameter === 'metadata' ||
-    preloadParameter === 'auto'
-      ? preloadParameter
-      : 'metadata';
-  const defaultMuted = parameters.get('defaultMuted') === 'true';
+const PlayerFixture = ({
+  source: sourceKey,
+  engine,
+  activationSource,
+  autoplay: autoplayInput,
+  loading: loadingInput,
+  preload: preloadInput,
+  defaultMuted: defaultMutedInput,
+  airplay,
+  sourceChange: sourceChangeInput
+}: PlayerFixtureProps) => {
+  const autoplay: Player.RootProps['autoplay'] = autoplayInput ?? false;
+  const loading: Player.PlayerLoadingStrategy = loadingInput ?? 'viewport';
+  const preload: Player.PlayerPreload = preloadInput ?? 'metadata';
+  const defaultMuted = defaultMutedInput ?? false;
   // See the "AirPlay demo control" note in apps/docs/src/main.tsx: gated so
   // the default fixture keeps a single page-global "Play" button.
-  const airplayDemo = parameters.get('airplay') === 'demo';
-  const sourceChange = parameters.get('sourceChange') === 'external';
-  const engineParameter = parameters.get('engine');
-  const hlsEngine: 'auto' | 'native' | 'hls.js' =
-    engineParameter === 'native' || engineParameter === 'hls.js'
-      ? engineParameter
-      : 'auto';
-  const sourceParameter = parameters.get('source');
+  const airplayDemo = airplay === 'demo';
+  const sourceChange = sourceChangeInput === 'external';
+  const hlsEngine: 'auto' | 'native' | 'hls.js' = engine ?? 'auto';
 
   const vimeoSource: Player.RootProps['source'] | null =
-    sourceParameter === 'vimeo'
+    sourceKey === 'vimeo'
       ? vimeoExampleUrl
-      : sourceParameter === 'vimeo-unlisted'
+      : sourceKey === 'vimeo-unlisted'
         ? 'https://player.vimeo.com/video/76979871/abc123hash'
-        : sourceParameter?.startsWith('https://')
-          ? sourceParameter
+        : sourceKey?.startsWith('https://')
+          ? sourceKey
           : null;
 
-  const activationSource: Player.RootProps['source'] =
-    sourceParameter === 'hls'
+  const initialSource: Player.RootProps['source'] =
+    sourceKey === 'hls'
       ? { type: 'hls', src: '/hls/master.m3u8', engine: hlsEngine }
-      : sourceParameter === 'live'
+      : sourceKey === 'live'
         ? { type: 'hls', src: '/live/index.m3u8', engine: hlsEngine }
         : (vimeoSource ??
           (sourceChange
             ? 'https://provider.invalid/source-a.mp4'
-            : parameters.get('activationSource') === 'external'
+            : activationSource === 'external'
               ? 'https://provider.invalid/tracer.mp4'
-              : parameters.get('activationSource') === 'youtube'
+              : activationSource === 'youtube'
                 ? youtubeExampleUrl
                 : '/tracer.mp4'));
 
@@ -278,7 +256,7 @@ const PlayerFixture = () => {
     ? 'https://provider.invalid/source-b.mp4'
     : null;
 
-  const [source, setSource] = useState(activationSource);
+  const [source, setSource] = useState(initialSource);
 
   return (
     <>
@@ -348,7 +326,7 @@ const YouTubeExample = () => (
   </Player.Root>
 );
 
-const meta: Meta<PlayerFixtureArgs> = {
+const meta: Meta<PlayerFixtureProps> = {
   title: 'Fixtures/PlayerFixture',
   tags: ['real-playback', '!test'],
   argTypes: {
@@ -391,17 +369,18 @@ const meta: Meta<PlayerFixtureArgs> = {
     docs: {
       description: {
         component:
-          'Reproduces the `apps/docs` `PlayerFixture` e2e contract as a Storybook story: same testids, same `data-*` state attributes, same `window.reelyHandle`, and the same URL-query-driven source-selection branching (`?source=hls&engine=hls.js`, etc.) as the docs page. Real providers, real media, real network — excluded from the deterministic story test suite (tagged `!test`).'
+          'Reproduces the `apps/docs` `PlayerFixture` e2e contract as one named Storybook story per scenario: same testids, same `data-*` state attributes, same `window.reelyHandle`, and the same source-selection branching as the docs page, driven by static story args instead of URL query parameters. Real providers, real media, real network — excluded from the deterministic story test suite (tagged `!test`).'
       }
     }
-  }
+  },
+  render: (args) => <PlayerFixture {...args} />
 };
 
 export default meta;
 
 type Story = StoryObj<typeof meta>;
 
-export const Default: Story = {
+export const NativeMp4: Story = {
   args: {
     engine: 'auto',
     autoplay: false,
@@ -409,10 +388,87 @@ export const Default: Story = {
     preload: 'metadata',
     defaultMuted: false
   },
-  render: () => (
+  render: (args) => (
     <>
-      <PlayerFixture />
+      <PlayerFixture {...args} />
       <YouTubeExample />
     </>
   )
+};
+
+export const HlsHlsJs: Story = {
+  args: { source: 'hls', engine: 'hls.js' }
+};
+
+export const HlsNative: Story = {
+  args: { source: 'hls', engine: 'native' }
+};
+
+export const LiveHlsJs: Story = {
+  args: { source: 'live', engine: 'hls.js' }
+};
+
+export const LiveNative: Story = {
+  args: { source: 'live', engine: 'native' }
+};
+
+export const AutoplayMuted: Story = {
+  args: { autoplay: 'muted' }
+};
+
+export const AutoplayAudible: Story = {
+  args: { autoplay: 'audible' }
+};
+
+export const AirplayDemo: Story = {
+  args: { airplay: 'demo' }
+};
+
+export const InteractionExternal: Story = {
+  args: { loading: 'interaction', activationSource: 'external' }
+};
+
+export const InteractionSourceChangeMuted: Story = {
+  args: {
+    loading: 'interaction',
+    sourceChange: 'external',
+    defaultMuted: true
+  }
+};
+
+export const InteractionPreloadNoneExternalMuted: Story = {
+  args: {
+    loading: 'interaction',
+    preload: 'none',
+    activationSource: 'external',
+    defaultMuted: true
+  }
+};
+
+export const InteractionYoutube: Story = {
+  args: { loading: 'interaction', activationSource: 'youtube' }
+};
+
+export const VimeoInteraction: Story = {
+  args: { source: 'vimeo', loading: 'interaction' }
+};
+
+export const VimeoViewport: Story = {
+  args: { source: 'vimeo' }
+};
+
+export const VimeoUnlistedInteraction: Story = {
+  args: { source: 'vimeo-unlisted', loading: 'interaction' }
+};
+
+export const VimeoInteractionMuted: Story = {
+  args: { source: 'vimeo', loading: 'interaction', defaultMuted: true }
+};
+
+export const VimeoFreePlan: Story = {
+  args: { source: 'https://vimeo.com/22439234', loading: 'interaction' }
+};
+
+export const VimeoPaidPlan: Story = {
+  args: { source: 'https://vimeo.com/1123898957', loading: 'interaction' }
 };

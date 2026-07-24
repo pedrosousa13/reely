@@ -95,7 +95,7 @@ test('youtube interaction activation rejects every YouTube request before the cl
   const youtubeRequests = await routeYouTube(page);
 
   await page.goto(
-    '/iframe.html?id=fixtures-playerfixture--default&viewMode=story&loading=interaction&activationSource=youtube'
+    '/iframe.html?id=fixtures-playerfixture--interaction-youtube&viewMode=story'
   );
   const activationButton = page.getByRole('button', { name: 'Play video' });
   await expect(activationButton).toBeVisible();
@@ -120,7 +120,7 @@ test('youtube one interaction click loads the provider and queues playback', asy
   const youtubeRequests = await routeYouTube(page);
 
   await page.goto(
-    '/iframe.html?id=fixtures-playerfixture--default&viewMode=story&loading=interaction&activationSource=youtube'
+    '/iframe.html?id=fixtures-playerfixture--interaction-youtube&viewMode=story'
   );
   const activationButton = page.getByRole('button', { name: 'Play video' });
   await expect(activationButton).toBeVisible();
@@ -150,7 +150,7 @@ test('youtube docs example stays dormant while the native fixture is used', asyn
   const youtubeRequests = await routeYouTube(page);
 
   await page.goto(
-    '/iframe.html?id=fixtures-playerfixture--default&viewMode=story'
+    '/iframe.html?id=fixtures-playerfixture--native-mp-4&viewMode=story'
   );
   const activationButton = page.getByRole('button', {
     name: 'Watch YouTube example'

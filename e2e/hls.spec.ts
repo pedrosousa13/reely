@@ -34,7 +34,7 @@ test('plays the local hls fixture to completion with the hls.js engine', async (
 
   const requests = recordRequests(page);
   await page.goto(
-    '/iframe.html?id=fixtures-playerfixture--default&viewMode=story&source=hls&engine=hls.js'
+    '/iframe.html?id=fixtures-playerfixture--hls-hls-js&viewMode=story'
   );
 
   await expect(page.getByTestId('hls-engine')).toHaveText('hls.js');
@@ -55,7 +55,7 @@ test('plays the local hls fixture natively without downloading hls.js', async ({
 
   const requests = recordRequests(page);
   await page.goto(
-    '/iframe.html?id=fixtures-playerfixture--default&viewMode=story&source=hls&engine=native'
+    '/iframe.html?id=fixtures-playerfixture--hls-native&viewMode=story'
   );
 
   await expect(page.getByTestId('hls-engine')).toHaveText('native');
@@ -75,7 +75,7 @@ test('surfaces a clear unsupported error for an impossible forced hls engine', a
   );
 
   await page.goto(
-    '/iframe.html?id=fixtures-playerfixture--default&viewMode=story&source=hls&engine=native'
+    '/iframe.html?id=fixtures-playerfixture--hls-native&viewMode=story'
   );
 
   await expect(page.getByTestId('error-category')).toHaveText('unsupported');

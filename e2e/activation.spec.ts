@@ -135,7 +135,7 @@ test('interaction activation makes no provider request before click', async ({
   const providerRequests = await routeProviderMedia(page);
 
   await page.goto(
-    '/iframe.html?id=fixtures-playerfixture--default&viewMode=story&loading=interaction&activationSource=external'
+    '/iframe.html?id=fixtures-playerfixture--interaction-external&viewMode=story'
   );
   const activationButton = page.getByRole('button', { name: 'Play video' });
   await expect(activationButton).toBeVisible();
@@ -156,7 +156,7 @@ test('interaction source change stays dormant until a second click', async ({
   const providerRequests = await routeProviderMedia(page);
 
   await page.goto(
-    '/iframe.html?id=fixtures-playerfixture--default&viewMode=story&loading=interaction&sourceChange=external&defaultMuted=true'
+    '/iframe.html?id=fixtures-playerfixture--interaction-source-change-muted&viewMode=story'
   );
   const activationButton = page.getByRole('button', { name: 'Play video' });
   await expect(activationButton).toBeVisible();
@@ -199,7 +199,7 @@ test('interaction preload=none plays from the activation click', async ({
   const providerRequests = await routeProviderMedia(page, playStarted);
 
   await page.goto(
-    '/iframe.html?id=fixtures-playerfixture--default&viewMode=story&loading=interaction&preload=none&activationSource=external&defaultMuted=true'
+    '/iframe.html?id=fixtures-playerfixture--interaction-preload-none-external-muted&viewMode=story'
   );
   const activationButton = page.getByRole('button', { name: 'Play video' });
   const documentElement = page.locator('html');
