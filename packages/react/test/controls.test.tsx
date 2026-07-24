@@ -124,6 +124,7 @@ describe('PlayButton', () => {
     const button = screen.getByRole('button', { name: 'Play' });
     expect(button.tagName).toBe('BUTTON');
     expect(attr(button, 'type')).toBe('button');
+    expect(attr(button, 'aria-pressed')).toBe('false');
     fireEvent.click(button);
     expect(spies.play).toHaveBeenCalledTimes(1);
   });
@@ -134,7 +135,7 @@ describe('PlayButton', () => {
     expect(attr(button, 'data-reely-part')).toBe('play-button');
     expect(attr(button, 'data-state')).toBe('playing');
     expect(attr(button, 'data-provider')).toBe('native');
-    expect(attr(button, 'data-playback-state')).toBe('playing');
+    expect(attr(button, 'aria-pressed')).toBe('true');
   });
 
   test('passes className, style and ref through, with a 44px target', () => {
@@ -234,6 +235,10 @@ describe('VolumeSlider', () => {
     const slider = screen.getByRole('slider', { name: 'Volume' });
     expect((slider as HTMLInputElement).value).toBe('0');
     expect(attr(slider, 'aria-valuetext')).toBe('0%');
+    // Muted is expressed only through data-state; the redundant data-muted
+    // presence attribute is gone.
+    expect(attr(slider, 'data-state')).toBe('muted');
+    expect(slider.hasAttribute('data-muted')).toBe(false);
   });
 });
 

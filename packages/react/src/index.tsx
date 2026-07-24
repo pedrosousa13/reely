@@ -29,7 +29,6 @@ import {
   useState,
   useSyncExternalStore,
   type ComponentPropsWithRef,
-  type ComponentPropsWithoutRef,
   type CSSProperties,
   type ImgHTMLAttributes,
   type ReactNode,
@@ -48,7 +47,7 @@ type SourceTransition = {
 
 export type ViewportProps = ComponentPropsWithRef<'div'>;
 
-export type PosterProps = ComponentPropsWithoutRef<'div'>;
+export type PosterProps = ComponentPropsWithRef<'div'>;
 
 export type ResponsivePoster = {
   readonly src: string;
@@ -1176,8 +1175,8 @@ export const PlayButton = ({
     <button
       {...props}
       aria-label={isPlaying ? 'Pause' : 'Play'}
+      aria-pressed={isPlaying}
       data-autoplay-state={autoplay}
-      data-playback-state={playback}
       data-provider={provider ?? undefined}
       data-reely-part="play-button"
       data-state={playback}
@@ -1256,7 +1255,6 @@ export const VolumeSlider = ({
       {...props}
       aria-label={ariaLabel ?? 'Volume'}
       aria-valuetext={`${percent}%`}
-      data-muted={muted ? '' : undefined}
       data-provider={provider ?? undefined}
       data-reely-part="volume-slider"
       data-state={muted ? 'muted' : 'unmuted'}

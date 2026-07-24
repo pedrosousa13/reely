@@ -786,7 +786,7 @@ test('keeps confirmed paused state when the media play command rejects', async (
     expect(
       screen
         .getByRole('button', { name: 'Play' })
-        .getAttribute('data-playback-state')
+        .getAttribute('data-state')
     ).toBe('paused');
   } finally {
     process.off('unhandledRejection', onUnhandledRejection);
@@ -844,7 +844,7 @@ test('remounts media and resets confirmed playing state after a transition to HL
   expect(
     screen
       .getByRole('button', { name: 'Play' })
-      .getAttribute('data-playback-state')
+      .getAttribute('data-state')
   ).toBe('paused');
 });
 
@@ -886,7 +886,7 @@ test.each([
     expect(
       screen
         .getByRole('button', { name: 'Play' })
-        .getAttribute('data-playback-state')
+        .getAttribute('data-state')
     ).toBe('paused');
   }
 );
@@ -1682,6 +1682,17 @@ test('forwards a ref, custom attributes, style, and aria-label to the native vid
   expect(video.style.opacity).toBe('0.5');
   // Library-owned attributes remain intact alongside the passthrough.
   expect(video.getAttribute('data-reely-part')).toBe('media');
+});
+
+test('forwards a ref to the poster container', () => {
+  const { Poster } = posterPrimitives;
+  const ref = createRef<HTMLDivElement>();
+  render(
+    <Poster ref={ref}>
+      <span>Poster</span>
+    </Poster>
+  );
+  expect(ref.current?.getAttribute('data-reely-part')).toBe('poster');
 });
 
 test('tolerates an inline callback ref through unrelated parent re-renders', () => {
