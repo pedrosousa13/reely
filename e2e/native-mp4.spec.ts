@@ -3,7 +3,9 @@ import { expect, test } from '@playwright/test';
 test('plays, pauses, and ends an MP4 with confirmed native states', async ({
   page
 }) => {
-  await page.goto('/');
+  await page.goto(
+    '/iframe.html?id=fixtures-playerfixture--default&viewMode=story'
+  );
 
   await page.getByRole('button', { name: 'Play' }).click();
 

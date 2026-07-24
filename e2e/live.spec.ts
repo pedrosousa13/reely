@@ -23,7 +23,9 @@ test('detects a live stream and adapts controls on the hls.js engine', async ({
   test.skip(browserName !== 'chromium', 'The hls.js flow runs on Chromium.');
 
   const requests = recordRequests(page);
-  await page.goto('/?source=live&engine=hls.js');
+  await page.goto(
+    '/iframe.html?id=fixtures-playerfixture--default&viewMode=story&args=source:live;engine:hls.js'
+  );
 
   await expect(page.getByTestId('hls-engine')).toHaveText('hls.js');
 
@@ -50,7 +52,9 @@ test('surfaces a behind-edge seek within the live window on the hls.js engine', 
   // seek is meaningful, which takes longer than the default per-test budget.
   test.setTimeout(30_000);
 
-  await page.goto('/?source=live&engine=hls.js');
+  await page.goto(
+    '/iframe.html?id=fixtures-playerfixture--default&viewMode=story&args=source:live;engine:hls.js'
+  );
   await expect(page.getByTestId('hls-engine')).toHaveText('hls.js');
 
   const panel = page.getByTestId('live-panel');
@@ -84,7 +88,9 @@ test('detects a live stream and never shows a fixed duration on native HLS', asy
   );
 
   const requests = recordRequests(page);
-  await page.goto('/?source=live&engine=native');
+  await page.goto(
+    '/iframe.html?id=fixtures-playerfixture--default&viewMode=story&args=source:live;engine:native'
+  );
 
   await expect(page.getByTestId('hls-engine')).toHaveText('native');
   await page.getByRole('button', { name: 'Play' }).click();

@@ -1,7 +1,9 @@
 import { expect, test } from '@playwright/test';
 
 test('muted autoplay reaches a confirmed started state', async ({ page }) => {
-  await page.goto('/?autoplay=muted');
+  await page.goto(
+    '/iframe.html?id=fixtures-playerfixture--default&viewMode=story&args=autoplay:muted'
+  );
 
   const button = page.locator('[data-autoplay-state]');
   await expect(button).toHaveAttribute('data-autoplay-state', 'started');
@@ -27,7 +29,9 @@ test('blocked audible autoplay waits for a user retry without muting', async ({
       return nativePlay.call(this);
     };
   });
-  await page.goto('/?autoplay=audible');
+  await page.goto(
+    '/iframe.html?id=fixtures-playerfixture--default&viewMode=story&args=autoplay:audible'
+  );
 
   const playButton = page.getByRole('button', { name: 'Play' });
   await expect(playButton).toHaveAttribute('data-autoplay-state', 'blocked');

@@ -30,7 +30,9 @@ test('plays the local hls fixture to completion with the hls.js engine', async (
   test.skip(browserName !== 'chromium', 'The hls.js flow runs on Chromium.');
 
   const requests = recordRequests(page);
-  await page.goto('/?source=hls&engine=hls.js');
+  await page.goto(
+    '/iframe.html?id=fixtures-playerfixture--default&viewMode=story&args=source:hls;engine:hls.js'
+  );
 
   await expect(page.getByTestId('hls-engine')).toHaveText('hls.js');
   await playToCompletion(page);
@@ -49,7 +51,9 @@ test('plays the local hls fixture natively without downloading hls.js', async ({
   );
 
   const requests = recordRequests(page);
-  await page.goto('/?source=hls&engine=native');
+  await page.goto(
+    '/iframe.html?id=fixtures-playerfixture--default&viewMode=story&args=source:hls;engine:native'
+  );
 
   await expect(page.getByTestId('hls-engine')).toHaveText('native');
   await playToCompletion(page);
@@ -67,7 +71,9 @@ test('surfaces a clear unsupported error for an impossible forced hls engine', a
     'Firefox deterministically lacks native HLS, making the forced native engine impossible.'
   );
 
-  await page.goto('/?source=hls&engine=native');
+  await page.goto(
+    '/iframe.html?id=fixtures-playerfixture--default&viewMode=story&args=source:hls;engine:native'
+  );
 
   await expect(page.getByTestId('error-category')).toHaveText('unsupported');
   await expect(page.getByTestId('hls-engine')).toHaveText('none');

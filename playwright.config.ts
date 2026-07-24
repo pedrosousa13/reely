@@ -9,10 +9,11 @@ export default defineConfig({
   use: { baseURL: 'http://127.0.0.1:4173' },
   webServer: {
     command:
-      './node_modules/.bin/vite preview apps/docs --host 127.0.0.1 --port 4173 --strictPort',
-    url: 'http://127.0.0.1:4173',
+      'pnpm --filter @reely/storybook exec storybook dev --ci --no-open -p 4173 --host 127.0.0.1',
+    url: 'http://127.0.0.1:4173/iframe.html?id=fixtures-playerfixture--default&viewMode=story',
     gracefulShutdown: { signal: 'SIGTERM', timeout: 500 },
-    reuseExistingServer: !process.env.CI
+    reuseExistingServer: !process.env.CI,
+    timeout: 120_000
   },
   projects: [
     { name: 'chromium', use: { ...devices['Desktop Chrome'] } },
