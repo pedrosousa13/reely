@@ -2043,4 +2043,78 @@ export const MenuRadioItem = ({
   );
 };
 
+export type GesturesProps = ComponentPropsWithRef<'div'> & {
+  readonly doubleTapSeek?: boolean;
+  readonly seekOffset?: number;
+  readonly onToggleControls?: () => void;
+  readonly onSeek?: (direction: 'forward' | 'backward', offset: number) => void;
+  readonly doubleTapWindowMs?: number;
+};
+
+export const Gestures = ({
+  doubleTapSeek = true,
+  seekOffset = 10,
+  onToggleControls,
+  onSeek,
+  doubleTapWindowMs = 300,
+  children,
+  onPointerUp,
+  style,
+  ...props
+}: GesturesProps) => {
+  const { controller } = usePlayer();
+  const layerRef = useRef<HTMLDivElement | null>(null);
+  const pendingTap = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (pendingTap.current !== null) {
+        clearTimeout(pendingTap.current);
+        pendingTap.current = null;
+      }
+    };
+  }, []);
+
+  return (
+    <div
+      {...props}
+      data-reely-part="gestures"
+      onPointerUp={(event) => {
+        onPointerUp?.(event);
+        if (event.defaultPrevented) return;
+        // Ignore taps that land on a real control inside the layer.
+        if (isNativeActivationTarget(event.target)) return;
+
+        if (!doubleTapSeek) {
+          // No double-tap action to disambiguate against — toggle immediately.
+          onToggleControls?.();
+          return;
+        }
+
+        if (pendingTap.current !== null) {
+          // Second tap within the window → double tap.
+          clearTimeout(pendingTap.current);
+          pendingTap.current = null;
+          const node = layerRef.current;
+          if (!node) return;
+          const rect = node.getBoundingClientRect();
+          const forward = event.clientX - rect.left >= rect.width / 2;
+          void controller.seekBy(forward ? seekOffset : -seekOffset);
+          onSeek?.(forward ? 'forward' : 'backward', seekOffset);
+          return;
+        }
+        // First tap → wait to see if a second arrives.
+        pendingTap.current = setTimeout(() => {
+          pendingTap.current = null;
+          onToggleControls?.();
+        }, doubleTapWindowMs);
+      }}
+      ref={layerRef}
+      style={{ position: 'absolute', inset: 0, ...style }}
+    >
+      {children}
+    </div>
+  );
+};
+
 export * from './icons.js';
