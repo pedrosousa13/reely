@@ -74,7 +74,16 @@ export type PosterImageProps = Omit<
 > &
   Partial<ResponsivePoster>;
 
-export type MediaProps = Omit<ComponentPropsWithRef<'video'>, 'children'> & {
+// Standard <video> passthrough, minus the attributes the controller owns:
+// `src` (driven by the resolved source / <source> children), `muted` and
+// `autoPlay` (activation + autoplay policy live in the controller), `preload`
+// (derived from the loading strategy), `poster` (use `nativePoster`), and
+// `children` (Media renders its own <source> set). Passing those would
+// silently desync or bypass the player's state machine, so they're excluded.
+export type MediaProps = Omit<
+  ComponentPropsWithRef<'video'>,
+  'children' | 'src' | 'muted' | 'autoPlay' | 'preload' | 'poster'
+> & {
   readonly nativePoster?: string;
 };
 
@@ -1279,8 +1288,8 @@ export const VolumeSlider = ({
 export type SeekSliderProps = ComponentPropsWithRef<'div'> & {
   // Escape hatch onto the inner range control (aria-label, step, disabled,
   // id/name, data-*, onChange, style). The library keeps ownership of the
-  // controlled attributes (value/min/max/type); consumer onChange is chained
-  // after the seek.
+  // controlled attributes (value/min/max/type/aria-valuetext); consumer
+  // onChange is chained after the seek.
   readonly inputProps?: ComponentPropsWithRef<'input'>;
 };
 

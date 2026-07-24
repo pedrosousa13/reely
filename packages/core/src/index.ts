@@ -733,7 +733,15 @@ export class PlayerController {
     this.#eventListeners.set(type, listeners);
     return () => {
       listeners.delete(keyedListener);
-      if (listeners.size === 0) this.#eventListeners.delete(type);
+      // Only drop the map entry if it still holds this (now-empty) set; a
+      // re-registration under the same type installs a fresh set that a
+      // duplicated unsubscribe must not delete.
+      if (
+        this.#eventListeners.get(type) === listeners &&
+        listeners.size === 0
+      ) {
+        this.#eventListeners.delete(type);
+      }
     };
   };
 

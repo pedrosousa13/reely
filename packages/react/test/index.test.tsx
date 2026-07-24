@@ -94,6 +94,21 @@ const verifyReadonlyStateTypes = (
   state.buffered[0]!.end = 10;
 };
 
+// Compile-time guard: Media excludes the controller-owned <video> attributes
+// so a consumer can't silently desync or bypass the player's state machine.
+const verifyMediaPropsExclusions = (): Player.MediaProps[] => [
+  // @ts-expect-error src is driven by the resolved source / <source> children.
+  { src: '/clip.mp4' },
+  // @ts-expect-error muted is owned by the controller (volume/activation).
+  { muted: true },
+  // @ts-expect-error autoPlay is owned by the controller (autoplay policy).
+  { autoPlay: true },
+  // @ts-expect-error use nativePoster instead of poster.
+  { poster: '/poster.jpg' },
+  // @ts-expect-error preload is derived from the loading strategy.
+  { preload: 'none' }
+];
+
 const confirmMetadataReady = (media: HTMLVideoElement): void => {
   Object.defineProperty(HTMLMediaElement, 'HAVE_METADATA', {
     configurable: true,
@@ -917,6 +932,7 @@ test('exposes stable actions and a ref handle backed by the Root controller', ()
     expect(event.detail.volume).toBeTypeOf('number');
   });
   expect(verifyReadonlyStateTypes).toBeTypeOf('function');
+  expect(verifyMediaPropsExclusions).toBeTypeOf('function');
 });
 
 test('keeps the imperative handle backed by the full PlayerController', () => {

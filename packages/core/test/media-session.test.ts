@@ -285,3 +285,29 @@ test('clears position state when the owning root is released', () => {
 
   expect(positionStates.at(-1)).toBeUndefined();
 });
+
+test('on() keeps a re-registered listener after a duplicated unsubscribe', () => {
+  const controller = new PlayerController();
+  const { emit, provider } = createProvider();
+  controller.setProvider(provider);
+
+  const first: string[] = [];
+  const off1 = controller.on('play', () => first.push('first'));
+  off1();
+
+  // A new listener for the same type registers a fresh internal set.
+  const second: string[] = [];
+  controller.on('play', () => second.push('second'));
+
+  // Duplicated unsubscribe of the already-removed listener must not disturb
+  // the new registration.
+  off1();
+
+  emit(
+    { playback: 'playing' },
+    { type: 'play', origin: 'user', detail: undefined }
+  );
+
+  expect(first).toEqual([]);
+  expect(second).toEqual(['second']);
+});
