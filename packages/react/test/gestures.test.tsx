@@ -138,7 +138,7 @@ describe('Gestures', () => {
     tapAt(layer, 150);
     act(() => vi.advanceTimersByTime(320));
     expect(spies.seekBy).not.toHaveBeenCalled();
-    expect(onToggle).toHaveBeenCalled();
+    expect(onToggle).toHaveBeenCalledTimes(1);
   });
 
   test('taps on interactive children are ignored', () => {

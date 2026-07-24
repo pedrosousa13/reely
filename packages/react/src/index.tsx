@@ -2085,16 +2085,15 @@ export const Gestures = ({
         // Ignore taps that land on a real control inside the layer.
         if (isNativeActivationTarget(event.target)) return;
 
-        if (!doubleTapSeek) {
-          // No double-tap action to disambiguate against — toggle immediately.
-          onToggleControls?.();
-          return;
-        }
-
         if (pendingTap.current !== null) {
-          // Second tap within the window → double tap.
+          // Second tap within the window.
           clearTimeout(pendingTap.current);
           pendingTap.current = null;
+          if (!doubleTapSeek) {
+            // No double-tap action to disambiguate against — a single toggle, not two.
+            onToggleControls?.();
+            return;
+          }
           const node = layerRef.current;
           if (!node) return;
           const rect = node.getBoundingClientRect();
