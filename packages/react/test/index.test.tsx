@@ -1660,6 +1660,30 @@ test('forwards nativePoster only to native videos and server-renders poster mark
   expect(markup).toContain('alt=""');
 });
 
+test('forwards a ref, custom attributes, style, and aria-label to the native video', () => {
+  const ref = createRef<HTMLVideoElement>();
+  render(
+    <LegacyRoot source="/clip.mp4">
+      <Player.Media
+        aria-label="Main video"
+        className="hero-video"
+        id="hero"
+        ref={ref}
+        style={{ opacity: 0.5 }}
+      />
+    </LegacyRoot>
+  );
+
+  const video = ref.current!;
+  expect(video.tagName).toBe('VIDEO');
+  expect(video.getAttribute('aria-label')).toBe('Main video');
+  expect(video.className).toBe('hero-video');
+  expect(video.id).toBe('hero');
+  expect(video.style.opacity).toBe('0.5');
+  // Library-owned attributes remain intact alongside the passthrough.
+  expect(video.getAttribute('data-reely-part')).toBe('media');
+});
+
 test('tolerates an inline callback ref through unrelated parent re-renders', () => {
   const observerInstances: unknown[] = [];
   class ManualIntersectionObserver implements IntersectionObserver {

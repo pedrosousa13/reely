@@ -75,7 +75,7 @@ export type PosterImageProps = Omit<
 > &
   Partial<ResponsivePoster>;
 
-export type MediaProps = {
+export type MediaProps = Omit<ComponentPropsWithRef<'video'>, 'children'> & {
   readonly nativePoster?: string;
 };
 
@@ -829,8 +829,30 @@ const sourceKey = (source: ReturnType<typeof detectSource>): string =>
     ? JSON.stringify(source.source)
     : 'unsupported-source';
 
-export const Media = ({ nativePoster }: MediaProps) => {
+export const Media = ({
+  nativePoster,
+  ref,
+  style,
+  'aria-label': ariaLabel,
+  ...rest
+}: MediaProps) => {
   const { mediaEligible, preload, registerMedia, source } = usePlayer();
+  // Merge the consumer ref onto the internal media registration. Declared
+  // before the eligibility returns so the hook order stays stable; only the
+  // native <video> branch uses it (the iframe mounts aren't a video element).
+  const mediaRef = useCallback(
+    (node: HTMLVideoElement | null) => {
+      registerMedia(node);
+      const consumerCleanup = assignRef(ref, node);
+      if (!node) return;
+      return () => {
+        registerMedia(null);
+        if (consumerCleanup) consumerCleanup();
+        else assignRef(ref, null);
+      };
+    },
+    [registerMedia, ref]
+  );
   if (!mediaEligible || source.status === 'failure') {
     return null;
   }
@@ -878,14 +900,15 @@ export const Media = ({ nativePoster }: MediaProps) => {
 
   return (
     <video
-      aria-label="Reely media"
+      playsInline
+      {...rest}
+      aria-label={ariaLabel ?? 'Reely media'}
       data-reely-part="media"
       key={sourceKey(source)}
       poster={nativePoster}
-      playsInline
       preload={preload}
-      ref={registerMedia}
-      style={{ position: 'relative', zIndex: 0 }}
+      ref={mediaRef}
+      style={{ position: 'relative', zIndex: 0, ...style }}
     >
       {source.source.type === 'video'
         ? source.source.sources.map(({ mimeType, src }, index) => (
