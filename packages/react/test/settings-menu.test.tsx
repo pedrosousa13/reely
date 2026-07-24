@@ -98,10 +98,12 @@ describe('SettingsMenu', () => {
         <Menu />
       </div>
     );
-    fireEvent.click(screen.getByRole('button', { name: 'Settings' }));
+    const trigger = screen.getByRole('button', { name: 'Settings' });
+    fireEvent.click(trigger);
     await waitFor(() => expect(screen.getByRole('menu')).toBeTruthy());
     fireEvent.pointerDown(screen.getByRole('button', { name: 'outside' }));
     expect(screen.queryByRole('menu')).toBeNull();
+    expect(hasFocus(trigger)).toBe(false);
   });
 
   test('menu items meet the 44px hit target', async () => {
