@@ -79,6 +79,25 @@ for (const key of hlsLibraryKeys) {
   }
 }
 
+// Icon tree-shaking: an icon rendered in the fixture ships in the static
+// bundle; an icon that is never imported is dropped from it.
+const closureFiles = new Set(
+  [...staticKeys].map((key) => manifest[key].file).filter(Boolean)
+);
+const closureSources = (
+  await Promise.all(
+    [...closureFiles].map((file) => readFile(new URL(file, root), 'utf8'))
+  )
+).join('\n');
+if (!closureSources.includes('M8 5v14l11-7z')) {
+  throw new Error('PlayIcon (used) did not ship in the static bundle.');
+}
+if (closureSources.includes('M12 5V2L7 6')) {
+  throw new Error(
+    'ReplayIcon (unused) did not tree-shake out of the static bundle.'
+  );
+}
+
 const mime = {
   '.css': 'text/css',
   '.html': 'text/html',
