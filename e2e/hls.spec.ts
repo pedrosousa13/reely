@@ -16,12 +16,12 @@ const recordRequests = (page: Page): string[] => {
 const playToCompletion = async (page: Page): Promise<void> => {
   await page.getByRole('button', { name: 'Play' }).click();
   await expect(page.getByRole('button', { name: 'Pause' })).toHaveAttribute(
-    'data-playback-state',
+    'data-state',
     'playing'
   );
 
   await expect(page.getByRole('button', { name: 'Play' })).toHaveAttribute(
-    'data-playback-state',
+    'data-state',
     'ended'
   );
 };

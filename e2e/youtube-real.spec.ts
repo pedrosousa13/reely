@@ -28,7 +28,7 @@ test(
     // browser allows it.
     const playButton = page.getByRole('button', { name: /Play|Pause/ });
     await expect(playButton).toHaveAttribute(
-      'data-playback-state',
+      'data-state',
       /playing|paused/,
       { timeout: 30_000 }
     );
