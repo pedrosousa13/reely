@@ -1719,6 +1719,11 @@ export const Controls = ({
         if (!global) handleShortcut(event);
       }}
       ref={setRef}
+      // Deliberately role="group", not "toolbar": the region owns media
+      // shortcuts (Arrow keys seek/adjust volume, J/L/K/M/F, Space) rather
+      // than roving-tabindex toolbar navigation. Native controls inside
+      // (buttons, links, range inputs) keep their own key handling; the
+      // shortcut handler skips those targets.
       role="group"
       style={style}
       tabIndex={tabIndex ?? 0}

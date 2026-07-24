@@ -613,6 +613,34 @@ describe('Controls container and scoped shortcuts', () => {
     expect(spies.mute).not.toHaveBeenCalled();
   });
 
+  test('leaves arrow keys to a focused slider input instead of the seek/volume shortcuts', () => {
+    const { container, spies } = renderWithPlayer(
+      <Player.Controls>
+        <Player.SeekSlider />
+        <Player.VolumeSlider />
+      </Player.Controls>,
+      controlsState()
+    );
+    const seekInput = container.querySelector<HTMLInputElement>(
+      '[data-reely-part="seek-slider-input"]'
+    )!;
+    seekInput.focus();
+    fireEvent.keyDown(seekInput, { key: 'ArrowRight' });
+    fireEvent.keyDown(seekInput, { key: 'ArrowLeft' });
+
+    const volumeInput = container.querySelector<HTMLInputElement>(
+      '[data-reely-part="volume-slider"]'
+    )!;
+    volumeInput.focus();
+    fireEvent.keyDown(volumeInput, { key: 'ArrowUp' });
+    fireEvent.keyDown(volumeInput, { key: 'ArrowDown' });
+
+    // The region's shortcut handler bails on native inputs, so the sliders'
+    // own arrow-key stepping owns the interaction (no double-handling).
+    expect(spies.seekBy).not.toHaveBeenCalled();
+    expect(spies.setVolume).not.toHaveBeenCalled();
+  });
+
   test('ignores shortcuts while an open menu has focus', () => {
     const { container, spies } = renderWithPlayer(
       <Player.Controls>
