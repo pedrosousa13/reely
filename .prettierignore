@@ -6,3 +6,4 @@ pnpm-lock.yaml
 .superpowers/
 docs/superpowers/plans/
 apps/docs/public/hls/
+apps/storybook/public/hls/

@@ -12,7 +12,7 @@
     "lint": "eslint . --ignore-pattern '**/.next/**'",
     "typecheck": "tsc -b",
     "test": "vitest run --passWithNoTests",
-    "test:e2e": "turbo run build --filter=@reely/docs && playwright test",
+    "test:e2e": "playwright test",
     "test:storybook": "pnpm --filter @reely/storybook test",
     "test:integrations": "turbo run build --filter=@reely/integration-next-image && pnpm --filter @reely/integration-next-image test:integration",
     "test:packages": "node scripts/verify-packaging.mjs",
