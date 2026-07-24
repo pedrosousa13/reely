@@ -6,6 +6,30 @@ import { ready } from './support';
 const meta = {
   title: 'Player/Time',
   component: Player.Time,
+  parameters: {
+    docs: {
+      description: {
+        component: [
+          '`Player.Time` displays current time and/or duration.',
+          '',
+          '**Usage** — compose it under `Player.Root` (a `Player.Viewport` or `Player.Controls` gives it layout context):',
+          '```tsx',
+          '<Player.Root source={source}>',
+          '  <Player.Viewport>',
+          '    <Player.Time type="current" />',
+          '  </Player.Viewport>',
+          '</Player.Root>',
+          '```',
+          '',
+          '**Contract** — renders `data-reely-part="time"`.',
+          '',
+          '**Accessibility** — text content; not an interactive control.',
+          '',
+          '**Capability** — not gated; it is a display-only element.'
+        ].join('\n')
+      }
+    }
+  },
   render: (args) => (
     <Player.Viewport style={{ width: 480, height: 270, background: '#0b0e13' }}>
       <Player.Time

@@ -6,6 +6,30 @@ import { ready } from './support';
 const meta = {
   title: 'Player/PlayButton',
   component: Player.PlayButton,
+  parameters: {
+    docs: {
+      description: {
+        component: [
+          '`Player.PlayButton` toggles play/pause on the active provider.',
+          '',
+          '**Usage** — compose it under `Player.Root` (a `Player.Viewport` or `Player.Controls` gives it layout context):',
+          '```tsx',
+          '<Player.Root source={source}>',
+          '  <Player.Viewport>',
+          '    <Player.PlayButton />',
+          '  </Player.Viewport>',
+          '</Player.Root>',
+          '```',
+          '',
+          '**Contract** — renders `data-reely-part="play-button"`, `data-provider="<provider>"`, and `data-state="paused" | "playing"`.',
+          '',
+          '**Accessibility** — a native `<button>`; label switches between "Play" and "Pause"; reachable and operable by keyboard (Tab to focus, Enter/Space to toggle).',
+          '',
+          '**Capability** — not capability-gated; it renders once a provider is attached.'
+        ].join('\n')
+      }
+    }
+  },
   render: () => (
     <Player.Viewport style={{ width: 480, height: 270, background: '#0b0e13' }}>
       <Player.PlayButton />

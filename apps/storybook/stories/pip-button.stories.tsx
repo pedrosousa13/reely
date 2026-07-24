@@ -6,6 +6,30 @@ import { available, notReady, ready } from './support';
 const meta = {
   title: 'Player/PipButton',
   component: Player.PipButton,
+  parameters: {
+    docs: {
+      description: {
+        component: [
+          '`Player.PipButton` toggles picture-in-picture.',
+          '',
+          '**Usage** — compose it under `Player.Root` (a `Player.Viewport` or `Player.Controls` gives it layout context):',
+          '```tsx',
+          '<Player.Root source={source}>',
+          '  <Player.Viewport>',
+          '    <Player.PipButton />',
+          '  </Player.Viewport>',
+          '</Player.Root>',
+          '```',
+          '',
+          '**Contract** — renders `data-reely-part="pip-button"` and `data-provider="<provider>"`.',
+          '',
+          '**Accessibility** — a native `<button>`; reachable and operable by keyboard (Tab to focus, Enter/Space to toggle).',
+          '',
+          '**Capability** — gated by `pictureInPicture`; renders nothing until `pictureInPicture` resolves `available`.'
+        ].join('\n')
+      }
+    }
+  },
   render: () => (
     <Player.Viewport style={{ width: 480, height: 270, background: '#0b0e13' }}>
       <Player.PipButton />

@@ -15,6 +15,33 @@ const barStyle = {
 const meta = {
   title: 'Player/Controls',
   component: Player.Controls,
+  parameters: {
+    docs: {
+      description: {
+        component: [
+          '`Player.Controls` is the control-bar container; `data-state` distinguishes a `global` bar from a `scoped` one.',
+          '',
+          '**Usage** — compose it under `Player.Root` (a `Player.Viewport` gives it layout context), nesting the individual control primitives inside it:',
+          '```tsx',
+          '<Player.Root source={source}>',
+          '  <Player.Viewport>',
+          '    <Player.Controls>',
+          '      <Player.PlayButton />',
+          '      <Player.SeekSlider />',
+          '    </Player.Controls>',
+          '  </Player.Viewport>',
+          '</Player.Root>',
+          '```',
+          '',
+          '**Contract** — renders `data-reely-part="controls"`, `data-provider="<provider>"`, and `data-state="global" | "scoped"`.',
+          '',
+          '**Accessibility** — groups its child controls.',
+          '',
+          '**Capability** — reflects the aggregate of `seek`, `setVolume`, `fullscreen`, and `pictureInPicture`.'
+        ].join('\n')
+      }
+    }
+  },
   render: () => (
     <Player.Viewport style={{ width: 640, height: 360, background: '#0b0e13' }}>
       <Player.Controls aria-label="Video player controls" style={barStyle}>
