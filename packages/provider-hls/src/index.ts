@@ -554,6 +554,7 @@ export const createHlsProvider = (
     exitFullscreen: native.exitFullscreen,
     requestPictureInPicture: native.requestPictureInPicture,
     exitPictureInPicture: native.exitPictureInPicture,
+    showAirPlayPicker: native.showAirPlayPicker,
     retry: async (): Promise<CommandResult> => {
       if (destroyed) return { ok: false, reason: 'not-ready' };
       if (!engine) {
