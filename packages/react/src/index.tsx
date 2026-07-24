@@ -845,9 +845,15 @@ export const Media = ({
   ...rest
 }: MediaProps) => {
   const { mediaEligible, preload, registerMedia, source } = usePlayer();
-  // Merge the consumer ref onto the internal media registration. Declared
-  // before the eligibility returns so the hook order stays stable; only the
-  // native <video> branch uses it (the iframe mounts aren't a video element).
+  // Merge the consumer ref onto the internal registration inside one callback
+  // ref (rather than Viewport's stable-callback + separate `[ref]` effect):
+  // Media is eligibility-gated and mounts its <video> late, so a `[ref]`
+  // effect would run before the element exists and never forward the ref when
+  // it finally mounts. Consumer refs on Media are expected to be stable; the
+  // trade-off is that a volatile (inline) ref re-runs this callback each
+  // render — behavior-preserving, verified to not reload the provider. Only
+  // the native <video> branch attaches this; the iframe mounts aren't a video
+  // element. Declared before the eligibility returns to keep hook order stable.
   const mediaRef = useCallback(
     (node: HTMLVideoElement | null) => {
       registerMedia(node);

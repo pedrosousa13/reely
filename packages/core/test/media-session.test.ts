@@ -268,6 +268,12 @@ test('clears position state when the stream goes live (duration null)', () => {
 
   emit({ duration: null, currentTime: 6 });
   expect(positionStates.at(-1)).toBeUndefined();
+
+  // Subsequent live ticks must not re-clear an already-cleared position.
+  const afterFirstClear = positionStates.length;
+  emit({ duration: null, currentTime: 7 });
+  emit({ duration: null, currentTime: 8 });
+  expect(positionStates.length).toBe(afterFirstClear);
 });
 
 test('clears position state when the owning root is released', () => {

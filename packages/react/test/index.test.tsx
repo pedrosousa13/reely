@@ -1694,6 +1694,31 @@ test('forwards a ref, custom attributes, style, and aria-label to the native vid
   expect(video.getAttribute('data-reely-part')).toBe('media');
 });
 
+test('an inline ref on Media does not reload the provider on parent re-renders', () => {
+  const loadSpy = vi.spyOn(HTMLMediaElement.prototype, 'load');
+  const Harness = () => {
+    const [tick, setTick] = useState(0);
+    return (
+      <div>
+        <button onClick={() => setTick((value) => value + 1)}>tick</button>
+        <LegacyRoot source="/clip.mp4">
+          <Player.Media data-tick={tick} ref={() => undefined} />
+        </LegacyRoot>
+      </div>
+    );
+  };
+  const { getByText } = render(<Harness />);
+  const loadsAfterMount = loadSpy.mock.calls.length;
+
+  fireEvent.click(getByText('tick'));
+  fireEvent.click(getByText('tick'));
+  fireEvent.click(getByText('tick'));
+
+  // A volatile consumer ref must not churn the internal media registration,
+  // which would tear down and reload the provider on every render.
+  expect(loadSpy.mock.calls.length).toBe(loadsAfterMount);
+});
+
 test('forwards a ref to the poster container', () => {
   const { Poster } = posterPrimitives;
   const ref = createRef<HTMLDivElement>();

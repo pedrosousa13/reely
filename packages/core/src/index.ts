@@ -1375,6 +1375,7 @@ export const bindMediaSession = (
   });
 
   let lastPlayback: PlaybackState | undefined;
+  let positionCleared = false;
 
   const unsubscribe = controller.subscribe((state) => {
     if (state.playback !== lastPlayback) {
@@ -1388,10 +1389,12 @@ export const bindMediaSession = (
         position: state.currentTime,
         playbackRate: state.playbackRate
       });
-    } else {
-      // Live/unknown duration: clear any stale finite position so the lock
-      // screen doesn't keep the last VOD position pinned.
+      positionCleared = false;
+    } else if (!positionCleared) {
+      // Live/unknown duration: clear the stale finite position once (not every
+      // tick) so the lock screen doesn't keep the last VOD position pinned.
       root.setPositionState(null);
+      positionCleared = true;
     }
   });
 
