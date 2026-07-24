@@ -21,7 +21,7 @@ const meta = {
           '</Player.Root>',
           '```',
           '',
-          '**Contract** — renders `data-reely-part="fullscreen-button"` and `data-provider="<provider>"`.',
+          '**Contract** — renders `data-reely-part="fullscreen-button"`, `data-provider="<provider>"`, and `data-state="active" | "inline"`.',
           '',
           '**Accessibility** — a native `<button>`; reachable and operable by keyboard (Tab to focus, Enter/Space to toggle).',
           '',

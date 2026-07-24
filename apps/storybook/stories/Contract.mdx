@@ -13,8 +13,9 @@ Every primitive exposes a stable styling/testing contract via data attributes.
 - **`data-state`** — the component's derived state (e.g. `paused`/`playing`,
   `muted`/`unmuted`, `idle`/`ready`, `loading`/`loaded`/`error`,
   `global`/`scoped`, or the activation state).
-- **`data-provider`** — present on capability-gated interactive controls,
-  carrying the active provider name.
+- **`data-provider`** — present on primitives that read the active provider
+  (it carries the active provider name, or is absent when no provider is
+  attached).
 
 Style and query against these attributes rather than internal class names.
 

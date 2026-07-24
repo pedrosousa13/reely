@@ -11,7 +11,7 @@ renders nothing.
 
 | Component                 | Gating capability                                     | Renders when                          |
 | ------------------------- | ----------------------------------------------------- | ------------------------------------- |
-| `Player.PlayButton`       | — (provider presence)                                 | a provider is attached                |
+| `Player.PlayButton`       | — (provider presence)                                 | always (not capability-gated)         |
 | `Player.MuteButton`       | `setVolume`                                           | `setVolume` is `available`            |
 | `Player.VolumeSlider`     | `setVolume`                                           | `setVolume` is `available`            |
 | `Player.SeekSlider`       | `seek`                                                | `seek` is `available`                 |

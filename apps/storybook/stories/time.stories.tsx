@@ -21,7 +21,7 @@ const meta = {
           '</Player.Root>',
           '```',
           '',
-          '**Contract** — renders `data-reely-part="time"`.',
+          '**Contract** — renders `data-reely-part="time"`, `data-state="timed" | "untimed"`, and `data-provider="<provider>"`.',
           '',
           '**Accessibility** — text content; not an interactive control.',
           '',

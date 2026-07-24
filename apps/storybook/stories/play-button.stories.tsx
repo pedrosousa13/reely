@@ -25,7 +25,7 @@ const meta = {
           '',
           '**Accessibility** — a native `<button>`; label switches between "Play" and "Pause"; reachable and operable by keyboard (Tab to focus, Enter/Space to toggle).',
           '',
-          '**Capability** — not capability-gated; it renders once a provider is attached.'
+          '**Capability** — not capability-gated; always renders (`data-provider` is set once a provider attaches).'
         ].join('\n')
       }
     }
