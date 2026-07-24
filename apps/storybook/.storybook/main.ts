@@ -24,8 +24,12 @@ const pendingAssetPlugin = (): PluginOption => {
 };
 
 const config: StorybookConfig = {
-  stories: ['../stories/**/*.stories.tsx'],
-  addons: ['@storybook/addon-a11y', '@storybook/addon-vitest'],
+  stories: ['../stories/**/*.mdx', '../stories/**/*.stories.tsx'],
+  addons: [
+    '@storybook/addon-a11y',
+    '@storybook/addon-docs',
+    '@storybook/addon-vitest'
+  ],
   framework: '@storybook/react-vite',
   viteFinal: (viteConfig) => ({
     ...viteConfig,
