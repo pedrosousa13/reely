@@ -292,6 +292,70 @@ describe('SeekSlider', () => {
     const slider = screen.getByRole('slider', { name: 'Seek' });
     expect((slider as HTMLInputElement).style.minHeight).toBe('44px');
   });
+
+  test('forwards inputProps to the range control and chains onChange', () => {
+    const onChange = vi.fn();
+    const { spies } = renderWithPlayer(
+      <Player.SeekSlider
+        inputProps={{
+          step: 5,
+          'aria-label': 'Scrub',
+          name: 'scrub',
+          onChange
+        }}
+      />,
+      seekReady()
+    );
+    const slider = screen.getByRole('slider', { name: 'Scrub' });
+    expect(attr(slider, 'step')).toBe('5');
+    expect(attr(slider, 'name')).toBe('scrub');
+    fireEvent.change(slider, { target: { value: '75' } });
+    expect(spies.seekTo).toHaveBeenCalledWith(75);
+    expect(onChange).toHaveBeenCalledOnce();
+  });
+
+  const liveWindow = (patch: ProviderStatePatch = {}): ProviderStatePatch => ({
+    ...capabilities({ seek: available }),
+    duration: null,
+    currentTime: 50,
+    seekable: [{ start: 20, end: 80 }],
+    ...patch
+  });
+
+  test('scrubs a live DVR window when duration is null but seekable exists', () => {
+    const { container } = renderWithPlayer(<Player.SeekSlider />, liveWindow());
+    const slider = screen.getByRole('slider', { name: 'Seek' });
+    expect(attr(slider, 'min')).toBe('20');
+    expect(attr(slider, 'max')).toBe('80');
+    expect((slider as HTMLInputElement).value).toBe('50');
+    expect(attr(slider, 'aria-valuetext')).toBe('0:50');
+    expect(
+      attr(
+        container.querySelector('[data-reely-part="seek-slider"]')!,
+        'data-state'
+      )
+    ).toBe('ready');
+  });
+
+  test('seeks within a live DVR window on change', () => {
+    const { spies } = renderWithPlayer(<Player.SeekSlider />, liveWindow());
+    const slider = screen.getByRole('slider', { name: 'Seek' });
+    fireEvent.change(slider, { target: { value: '65' } });
+    expect(spies.seekTo).toHaveBeenCalledWith(65);
+  });
+
+  test('positions buffered ranges relative to a live DVR window', () => {
+    const { container } = renderWithPlayer(
+      <Player.SeekSlider />,
+      liveWindow({ buffered: [{ start: 35, end: 50 }] })
+    );
+    const range = container.querySelector<HTMLElement>(
+      '[data-reely-part="seek-buffered-range"]'
+    )!;
+    // window span 60, offset 20: left (35-20)/60=25%, width 15/60=25%.
+    expect(range.style.left).toBe('25%');
+    expect(range.style.width).toBe('25%');
+  });
 });
 
 describe('Time', () => {

@@ -8,7 +8,8 @@ import {
   type MediaSessionBinding,
   type MediaSessionLike,
   type PlayerSource,
-  type PlayerState
+  type PlayerState,
+  type TimeRange
 } from '@reely/core';
 import type { NativePlaybackOptions } from '@reely/provider-native';
 import {
@@ -1250,42 +1251,73 @@ export const VolumeSlider = ({
   );
 };
 
-export type SeekSliderProps = ComponentPropsWithRef<'div'>;
+export type SeekSliderProps = ComponentPropsWithRef<'div'> & {
+  // Escape hatch onto the inner range control (aria-label, step, disabled,
+  // id/name, data-*, onChange, style). The library keeps ownership of the
+  // controlled attributes (value/min/max/type); consumer onChange is chained
+  // after the seek.
+  readonly inputProps?: ComponentPropsWithRef<'input'>;
+};
 
-export const SeekSlider = ({ children, style, ...props }: SeekSliderProps) => {
-  const { buffered, currentTime, duration, provider, status } = usePlayerState(
-    (state) => ({
+// The scrubbable range: [0, duration] for VOD, or the seekable window extent
+// for live DVR where duration is null but a moving window is present.
+const seekWindow = (
+  duration: number | null,
+  seekable: ReadonlyArray<TimeRange>
+): { readonly start: number; readonly end: number } | null => {
+  if (typeof duration === 'number' && duration > 0) {
+    return { start: 0, end: duration };
+  }
+  if (seekable.length === 0) return null;
+  const start = Math.min(...seekable.map((range) => range.start));
+  const end = Math.max(...seekable.map((range) => range.end));
+  return end > start ? { start, end } : null;
+};
+
+export const SeekSlider = ({
+  children,
+  inputProps,
+  style,
+  ...props
+}: SeekSliderProps) => {
+  const { buffered, currentTime, duration, provider, seekable, status } =
+    usePlayerState((state) => ({
       buffered: state.buffered,
       currentTime: state.currentTime,
       duration: state.duration,
       provider: state.provider,
+      seekable: state.seekable,
       status: state.capabilities.seek.status
-    })
-  );
+    }));
   const { controller } = usePlayer();
   if (status !== 'available') return null;
   const hasDuration = typeof duration === 'number' && duration > 0;
-  const max = hasDuration ? duration : 0;
-  const value = hasDuration ? Math.min(currentTime, duration) : 0;
+  const window = seekWindow(duration, seekable);
+  const min = window ? window.start : 0;
+  const max = window ? window.end : 0;
+  const span = max - min;
+  const value = window
+    ? Math.min(Math.max(currentTime, min), max)
+    : 0;
 
   return (
     <div
       {...props}
       data-provider={provider ?? undefined}
       data-reely-part="seek-slider"
-      data-state={hasDuration ? 'ready' : 'idle'}
+      data-state={window ? 'ready' : 'idle'}
       style={{ position: 'relative', minHeight: 44, ...style }}
     >
       <div aria-hidden="true" data-reely-part="seek-buffered">
-        {hasDuration
+        {window
           ? buffered.map((range, index) => (
               <div
                 data-reely-part="seek-buffered-range"
                 key={`${range.start}:${range.end}:${index}`}
                 style={{
                   position: 'absolute',
-                  left: `${(range.start / duration) * 100}%`,
-                  width: `${((range.end - range.start) / duration) * 100}%`
+                  left: `${(Math.max(range.start - min, 0) / span) * 100}%`,
+                  width: `${((range.end - range.start) / span) * 100}%`
                 }}
               />
             ))
@@ -1293,6 +1325,8 @@ export const SeekSlider = ({ children, style, ...props }: SeekSliderProps) => {
       </div>
       <input
         aria-label="Seek"
+        step={1}
+        {...inputProps}
         aria-valuetext={
           hasDuration
             ? `${formatTime(value)} of ${formatTime(duration)}`
@@ -1300,13 +1334,13 @@ export const SeekSlider = ({ children, style, ...props }: SeekSliderProps) => {
         }
         data-reely-part="seek-slider-input"
         max={max}
-        min={0}
+        min={min}
         onChange={(event) => {
           const next = Number(event.currentTarget.value);
           if (Number.isFinite(next)) void controller.seekTo(next);
+          inputProps?.onChange?.(event);
         }}
-        step={1}
-        style={{ width: '100%', minHeight: 44 }}
+        style={{ width: '100%', minHeight: 44, ...inputProps?.style }}
         type="range"
         value={value}
       />
