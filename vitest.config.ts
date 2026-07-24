@@ -24,6 +24,9 @@ export default defineConfig({
   },
   test: {
     environment: 'happy-dom',
-    include: ['packages/**/*.test.{ts,tsx}', 'apps/storybook/stories/**/*.contract.test.ts']
+    include: [
+      'packages/**/*.test.{ts,tsx}',
+      'apps/storybook/stories/**/*.contract.test.ts'
+    ]
   }
 });
