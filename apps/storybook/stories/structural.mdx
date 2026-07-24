@@ -1,0 +1,17 @@
+import { Meta } from '@storybook/addon-docs/blocks';
+
+<Meta title="Player/Structural" />
+
+# Structural components
+
+These wire the player together and are exercised implicitly by every other
+story rather than shown in isolation.
+
+- **`Player.Root`** — owns the `PlayerController`; its imperative handle is the
+  controller. Props include `loading` (`eager` | `viewport` | `interaction`),
+  `loadMargin`, `preload`, `autoplay`, and native playback options.
+- **`Player.Viewport`** — the layout box controls compose into; registers with
+  the controller for viewport-triggered activation.
+- **`Player.Media`** — mounts the actual media element once a provider attaches.
+  Not rendered in stories (the mock provider issues no media), so real playback
+  lives in the docs app.

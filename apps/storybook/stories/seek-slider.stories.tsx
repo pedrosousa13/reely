@@ -6,6 +6,30 @@ import { available, notReady, ready } from './support';
 const meta = {
   title: 'Player/SeekSlider',
   component: Player.SeekSlider,
+  parameters: {
+    docs: {
+      description: {
+        component: [
+          '`Player.SeekSlider` scrubs the current time; a child `seek-buffered` element reflects buffered ranges.',
+          '',
+          '**Usage** — compose it under `Player.Root` (a `Player.Viewport` or `Player.Controls` gives it layout context):',
+          '```tsx',
+          '<Player.Root source={source}>',
+          '  <Player.Viewport>',
+          '    <Player.SeekSlider />',
+          '  </Player.Viewport>',
+          '</Player.Root>',
+          '```',
+          '',
+          '**Contract** — renders `data-reely-part="seek-slider"` (with a child `data-reely-part="seek-buffered"`), `data-provider="<provider>"`, and `data-state="idle" | "ready"` (`ready` once a duration is known).',
+          '',
+          '**Accessibility** — a range control; arrow keys seek.',
+          '',
+          '**Capability** — gated by `seek`; renders nothing until `seek` resolves `available`.'
+        ].join('\n')
+      }
+    }
+  },
   render: () => (
     <Player.Viewport style={{ width: 480, height: 270, background: '#0b0e13' }}>
       <Player.SeekSlider style={{ width: '90%', margin: '2rem auto' }} />

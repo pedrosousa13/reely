@@ -6,6 +6,30 @@ import { available, notReady, ready } from './support';
 const meta = {
   title: 'Player/MuteButton',
   component: Player.MuteButton,
+  parameters: {
+    docs: {
+      description: {
+        component: [
+          '`Player.MuteButton` mutes/unmutes the active provider.',
+          '',
+          '**Usage** — compose it under `Player.Root` (a `Player.Viewport` or `Player.Controls` gives it layout context):',
+          '```tsx',
+          '<Player.Root source={source}>',
+          '  <Player.Viewport>',
+          '    <Player.MuteButton />',
+          '  </Player.Viewport>',
+          '</Player.Root>',
+          '```',
+          '',
+          '**Contract** — renders `data-reely-part="mute-button"`, `data-provider="<provider>"`, and `data-state="muted" | "unmuted"`.',
+          '',
+          '**Accessibility** — a native `<button>`; label reflects the mute state; reachable and operable by keyboard (Tab to focus, Enter/Space to toggle).',
+          '',
+          '**Capability** — gated by `setVolume`; renders nothing until `setVolume` resolves `available`.'
+        ].join('\n')
+      }
+    }
+  },
   render: () => (
     <Player.Viewport style={{ width: 480, height: 270, background: '#0b0e13' }}>
       <Player.MuteButton />

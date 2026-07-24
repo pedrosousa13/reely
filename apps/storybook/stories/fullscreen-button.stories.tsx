@@ -6,6 +6,30 @@ import { available, notReady, unavailable, ready } from './support';
 const meta = {
   title: 'Player/FullscreenButton',
   component: Player.FullscreenButton,
+  parameters: {
+    docs: {
+      description: {
+        component: [
+          '`Player.FullscreenButton` toggles fullscreen on the viewport.',
+          '',
+          '**Usage** — compose it under `Player.Root` (a `Player.Viewport` or `Player.Controls` gives it layout context):',
+          '```tsx',
+          '<Player.Root source={source}>',
+          '  <Player.Viewport>',
+          '    <Player.FullscreenButton />',
+          '  </Player.Viewport>',
+          '</Player.Root>',
+          '```',
+          '',
+          '**Contract** — renders `data-reely-part="fullscreen-button"`, `data-provider="<provider>"`, and `data-state="active" | "inline"`.',
+          '',
+          '**Accessibility** — a native `<button>`; reachable and operable by keyboard (Tab to focus, Enter/Space to toggle).',
+          '',
+          '**Capability** — gated by `fullscreen`; renders nothing until `fullscreen` resolves `available`.'
+        ].join('\n')
+      }
+    }
+  },
   render: () => (
     <Player.Viewport style={{ width: 480, height: 270, background: '#0b0e13' }}>
       <Player.FullscreenButton />

@@ -6,6 +6,30 @@ import { available, notReady, ready } from './support';
 const meta = {
   title: 'Player/VolumeSlider',
   component: Player.VolumeSlider,
+  parameters: {
+    docs: {
+      description: {
+        component: [
+          "`Player.VolumeSlider` sets the active provider's volume.",
+          '',
+          '**Usage** — compose it under `Player.Root` (a `Player.Viewport` or `Player.Controls` gives it layout context):',
+          '```tsx',
+          '<Player.Root source={source}>',
+          '  <Player.Viewport>',
+          '    <Player.VolumeSlider />',
+          '  </Player.Viewport>',
+          '</Player.Root>',
+          '```',
+          '',
+          '**Contract** — renders `data-reely-part="volume-slider"`, `data-provider="<provider>"`, and `data-state="muted" | "unmuted"`.',
+          '',
+          '**Accessibility** — exposes a range semantics control; arrow keys adjust the value.',
+          '',
+          '**Capability** — gated by `setVolume`; renders nothing until `setVolume` resolves `available`.'
+        ].join('\n')
+      }
+    }
+  },
   render: () => (
     <Player.Viewport style={{ width: 480, height: 270, background: '#0b0e13' }}>
       <Player.VolumeSlider />

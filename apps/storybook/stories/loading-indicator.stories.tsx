@@ -5,6 +5,21 @@ import { expect, waitFor } from 'storybook/test';
 const meta = {
   title: 'Player/LoadingIndicator',
   component: Player.LoadingIndicator,
+  parameters: {
+    docs: {
+      description: {
+        component: [
+          '`Player.LoadingIndicator` surfaces buffering/loading.',
+          '',
+          '**Contract** — `data-reely-part="loading-indicator"`, `data-state`.',
+          '',
+          '**Accessibility** — decorative/status.',
+          '',
+          '**Capability** — not gated (state-driven).'
+        ].join('\n')
+      }
+    }
+  },
   render: () => (
     <Player.Viewport style={{ width: 480, height: 270, background: '#0b0e13' }}>
       <Player.LoadingIndicator
