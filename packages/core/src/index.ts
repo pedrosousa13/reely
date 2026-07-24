@@ -1277,6 +1277,9 @@ export const createMediaSessionCoordinator = (
     }
     session.metadata = null;
     session.playbackState = 'none';
+    if (typeof session.setPositionState === 'function') {
+      session.setPositionState(undefined);
+    }
   };
 
   const wireHandlers = (actions: MediaSessionActions): void => {
@@ -1389,6 +1392,10 @@ export const bindMediaSession = (
         position: state.currentTime,
         playbackRate: state.playbackRate
       });
+    } else {
+      // Live/unknown duration: clear any stale finite position so the lock
+      // screen doesn't keep the last VOD position pinned.
+      root.setPositionState(null);
     }
   });
 
