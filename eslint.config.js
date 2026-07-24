@@ -14,7 +14,8 @@ export default tseslint.config(
       '.superpowers/**',
       'docs/superpowers/plans/**',
       // MPEG-TS media segments share the .ts extension with TypeScript.
-      'apps/docs/public/hls/**'
+      'apps/docs/public/hls/**',
+      'apps/storybook/public/hls/**'
     ]
   },
   js.configs.recommended,
