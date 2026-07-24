@@ -141,7 +141,9 @@ describe('MenuRadioGroup', () => {
     const selected = screen.getByRole('menuitemradio', { name: '1×' });
     expect(selected.getAttribute('aria-checked')).toBe('true');
     expect(
-      screen.getByRole('menuitemradio', { name: '0.5×' }).getAttribute('aria-checked')
+      screen
+        .getByRole('menuitemradio', { name: '0.5×' })
+        .getAttribute('aria-checked')
     ).toBe('false');
   });
 
@@ -160,7 +162,9 @@ describe('MenuRadioGroup', () => {
     rerender(<SpeedMenu value={value} onValueChange={onChange} />);
     fireEvent.click(trigger);
     expect(
-      screen.getByRole('menuitemradio', { name: '2×' }).getAttribute('aria-checked')
+      screen
+        .getByRole('menuitemradio', { name: '2×' })
+        .getAttribute('aria-checked')
     ).toBe('true');
   });
 });

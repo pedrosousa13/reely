@@ -1826,8 +1826,7 @@ export const SettingsMenuTrigger = ({
   style,
   ...props
 }: ComponentPropsWithRef<'button'>) => {
-  const { open, setOpen, triggerRef, triggerId, contentId } =
-    useSettingsMenu();
+  const { open, setOpen, triggerRef, triggerId, contentId } = useSettingsMenu();
   return (
     <button
       {...props}

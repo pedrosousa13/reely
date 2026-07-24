@@ -1,6 +1,12 @@
 // @vitest-environment happy-dom
 
-import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  screen
+} from '@testing-library/react';
 import { createRef } from 'react';
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import {
@@ -68,7 +74,17 @@ const tapAt = (layer: Element, clientX: number) => {
   // width is mocked to 200 below; left half < 100, right half >= 100.
   Object.defineProperty(layer, 'getBoundingClientRect', {
     configurable: true,
-    value: () => ({ left: 0, width: 200, right: 200, top: 0, height: 100, bottom: 100, x: 0, y: 0, toJSON: () => ({}) })
+    value: () => ({
+      left: 0,
+      width: 200,
+      right: 200,
+      top: 0,
+      height: 100,
+      bottom: 100,
+      x: 0,
+      y: 0,
+      toJSON: () => ({})
+    })
   });
   fireEvent.pointerUp(layer, { clientX, clientY: 10 });
 };

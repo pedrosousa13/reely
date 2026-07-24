@@ -40,6 +40,7 @@ Focus rule (satisfies AC): on any close path (Escape, select, trigger re-toggle)
 Optional named export `<Player.Gestures>` — full-bleed layer inside `Viewport`, `data-reely-part="gestures"`, `position:absolute; inset:0`, z-index below `Controls`/`ActivationButton` and above `Media`/`Poster`.
 
 Props:
+
 - `doubleTapSeek?: boolean = true` — enable double-tap seek.
 - `seekOffset?: number = 10` — seconds.
 - `onToggleControls?: () => void` — single-tap callback (#9 wires to its visibility store).
@@ -47,6 +48,7 @@ Props:
 - `children?` — optional feedback overlay slot.
 
 Behavior:
+
 - Single tap → `onToggleControls()`. **Never** toggles playback. The centered play affordance (`ActivationButton` / a `PlayButton`) stays the only play trigger.
 - Double tap (two taps within ~300ms): left half → `controller.seekBy(-seekOffset)`, right half → `controller.seekBy(+seekOffset)`, plus `onSeek(dir, seekOffset)`. `doubleTapSeek={false}` disables the seek only (single-tap toggle still works).
 - Single vs double disambiguated with a ~300ms timer (first tap waits to confirm no second tap before firing toggle).

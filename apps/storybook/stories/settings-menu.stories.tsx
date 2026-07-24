@@ -51,7 +51,12 @@ const meta = {
   },
   render: () => (
     <Player.Viewport
-      style={{ width: 640, height: 360, background: '#0b0e13', position: 'relative' }}
+      style={{
+        width: 640,
+        height: 360,
+        background: '#0b0e13',
+        position: 'relative'
+      }}
     >
       <SpeedMenu />
     </Player.Viewport>

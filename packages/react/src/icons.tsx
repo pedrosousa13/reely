@@ -2,9 +2,11 @@ import type { ReactElement, SVGProps } from 'react';
 
 type IconProps = SVGProps<SVGSVGElement>;
 
-const Icon = (
-  { children, 'aria-hidden': ariaHidden, ...props }: IconProps & { children: ReactElement | ReactElement[] }
-): ReactElement => (
+const Icon = ({
+  children,
+  'aria-hidden': ariaHidden,
+  ...props
+}: IconProps & { children: ReactElement | ReactElement[] }): ReactElement => (
   <svg
     aria-hidden={ariaHidden === false ? undefined : (ariaHidden ?? true)}
     fill="currentColor"
@@ -44,7 +46,12 @@ export const VolumeLowIcon = (props: IconProps): ReactElement => (
 export const MutedIcon = (props: IconProps): ReactElement => (
   <Icon {...props}>
     <path d="M3 10v4h4l5 4V6L7 10H3z" />
-    <path d="M15 9l6 6m0-6l-6 6" fill="none" stroke="currentColor" strokeWidth="2" />
+    <path
+      d="M15 9l6 6m0-6l-6 6"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+    />
   </Icon>
 );
 
@@ -75,7 +82,10 @@ export const PipExitIcon = (props: IconProps): ReactElement => (
 export const SettingsIcon = (props: IconProps): ReactElement => (
   <Icon {...props}>
     <path d="M12 8a4 4 0 100 8 4 4 0 000-8zm0 2a2 2 0 110 4 2 2 0 010-4z" />
-    <path d="M10.5 2h3l.5 2.6a7.5 7.5 0 011.7 1l2.5-1 1.5 2.6-2 1.7a7.6 7.6 0 010 2l2 1.7-1.5 2.6-2.5-1a7.5 7.5 0 01-1.7 1L13.5 22h-3l-.5-2.6a7.5 7.5 0 01-1.7-1l-2.5 1L4.3 15.8l2-1.7a7.6 7.6 0 010-2l-2-1.7L5.8 7.8l2.5 1a7.5 7.5 0 011.7-1L10.5 2z" fillRule="evenodd" />
+    <path
+      d="M10.5 2h3l.5 2.6a7.5 7.5 0 011.7 1l2.5-1 1.5 2.6-2 1.7a7.6 7.6 0 010 2l2 1.7-1.5 2.6-2.5-1a7.5 7.5 0 01-1.7 1L13.5 22h-3l-.5-2.6a7.5 7.5 0 01-1.7-1l-2.5 1L4.3 15.8l2-1.7a7.6 7.6 0 010-2l-2-1.7L5.8 7.8l2.5 1a7.5 7.5 0 011.7-1L10.5 2z"
+      fillRule="evenodd"
+    />
   </Icon>
 );
 
