@@ -1882,6 +1882,10 @@ export const SettingsMenuContent = ({
     const onPointerDown = (event: PointerEvent): void => {
       const target = event.target as Node | null;
       if (target && rootRef.current && !rootRef.current.contains(target)) {
+        // Deliberately setOpen(false), not close(): unlike Escape/select,
+        // an outside pointerdown must not steal focus back to the trigger.
+        // Mouse users clicking empty space may land focus on <body> —
+        // this matches native menu behavior.
         setOpen(false);
       }
     };
@@ -2043,12 +2047,20 @@ export const MenuRadioItem = ({
   );
 };
 
+const DOUBLE_TAP_WINDOW_MS = 300;
+
+/**
+ * Full-bleed gesture layer (`position: absolute; inset: 0`) with no
+ * z-index. It must be placed BEFORE (as an earlier sibling of)
+ * interactive layers like `Controls`/`ActivationButton` so those paint
+ * on top and stay clickable — placed after them, it will cover and
+ * block them.
+ */
 export type GesturesProps = ComponentPropsWithRef<'div'> & {
   readonly doubleTapSeek?: boolean;
   readonly seekOffset?: number;
   readonly onToggleControls?: () => void;
   readonly onSeek?: (direction: 'forward' | 'backward', offset: number) => void;
-  readonly doubleTapWindowMs?: number;
 };
 
 export const Gestures = ({
@@ -2056,7 +2068,6 @@ export const Gestures = ({
   seekOffset = 10,
   onToggleControls,
   onSeek,
-  doubleTapWindowMs = 300,
   children,
   onPointerUp,
   style,
@@ -2106,7 +2117,7 @@ export const Gestures = ({
         pendingTap.current = setTimeout(() => {
           pendingTap.current = null;
           onToggleControls?.();
-        }, doubleTapWindowMs);
+        }, DOUBLE_TAP_WINDOW_MS);
       }}
       ref={layerRef}
       style={{ position: 'absolute', inset: 0, ...style }}
