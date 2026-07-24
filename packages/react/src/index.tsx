@@ -1606,6 +1606,7 @@ export const Controls = ({
         }
         case 'm':
         case 'M':
+          if (volumeStatus !== 'available') return;
           event.preventDefault();
           void controller.toggleMuted();
           return;

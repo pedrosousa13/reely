@@ -567,6 +567,31 @@ describe('Controls container and scoped shortcuts', () => {
     expect(spies.requestFullscreen).toHaveBeenCalledTimes(1);
   });
 
+  test('does not mute via M when volume control is unavailable', () => {
+    const { container, spies } = renderWithPlayer(
+      <Player.Controls>
+        <Player.Time />
+      </Player.Controls>,
+      {
+        ...capabilities({
+          seek: available,
+          setVolume: unavailable,
+          fullscreen: available
+        }),
+        duration: 100,
+        currentTime: 30,
+        volume: 0.5,
+        playback: 'paused'
+      }
+    );
+    const region = container.querySelector<HTMLElement>(
+      '[data-reely-part="controls"]'
+    )!;
+    region.focus();
+    fireEvent.keyDown(region, { key: 'm' });
+    expect(spies.mute).not.toHaveBeenCalled();
+  });
+
   test('ignores shortcuts originating from editable fields', () => {
     const { container, spies } = renderWithPlayer(
       <Player.Controls>
