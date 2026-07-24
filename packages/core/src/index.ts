@@ -161,11 +161,6 @@ export type ProviderStateListener = (
   event?: ProviderEvent
 ) => void;
 
-export type ParsedSource = {
-  type: 'mp4';
-  url: string;
-};
-
 export type VideoFileSource = {
   type: 'video';
   sources: ReadonlyArray<{ src: string; mimeType: string }>;
@@ -334,16 +329,6 @@ const unsubscribeSafely = (unsubscribe: (() => void) | undefined): void => {
   } catch {
     // Provider cleanup must not escape the controller boundary.
   }
-};
-
-export const parseSource = (source: string): ParsedSource => {
-  if (!/\.mp4(?:$|[?#])/i.test(source)) {
-    throw new Error(
-      'Only MP4 sources are supported by the native tracer bullet.'
-    );
-  }
-
-  return { type: 'mp4', url: source };
 };
 
 const explicitObjectGuidance =
