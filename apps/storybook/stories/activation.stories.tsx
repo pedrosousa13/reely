@@ -10,6 +10,19 @@ const overlayState = (
 const meta = {
   title: 'Player/ActivationButton',
   component: Player.ActivationButton,
+  parameters: {
+    docs: {
+      description: {
+        component: [
+          '`Player.ActivationButton` triggers pre-provider activation (`dormant`/`eligible`/`loading-provider`/`error`).',
+          '',
+          '**Contract** — `data-reely-part="activation"`, `data-state="<activation>"`.',
+          '',
+          '**Accessibility** — native `<button>`, keyboard-operable.'
+        ].join('\n')
+      }
+    }
+  },
   render: () => (
     <Player.Viewport style={{ width: 480, height: 270, background: '#0b0e13' }}>
       <Player.ActivationButton />

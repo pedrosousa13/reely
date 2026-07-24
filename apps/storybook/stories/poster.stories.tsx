@@ -23,7 +23,20 @@ const posterImage = (canvasElement: HTMLElement): HTMLElement => {
 
 const meta = {
   title: 'Player/Poster',
-  component: Player.Poster
+  component: Player.Poster,
+  parameters: {
+    docs: {
+      description: {
+        component: [
+          '`Player.Poster` is the pre-playback surface; wrap a `Player.PosterImage` or arbitrary children.',
+          '',
+          '**Contract** — `data-reely-part="poster"`, `data-state`.',
+          '',
+          '**Note** — children replace the default image.'
+        ].join('\n')
+      }
+    }
+  }
 } satisfies Meta<typeof Player.Poster>;
 
 export default meta;
