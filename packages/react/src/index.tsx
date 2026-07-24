@@ -1063,12 +1063,27 @@ export const PosterImage = ({
     rerender((value) => value + 1);
   };
 
+  // Cached images can finish loading before React attaches onLoad/onError, so
+  // those events never fire and `data-state` would stay 'loading' forever.
+  // On mount and whenever the request changes, resolve an already-complete
+  // image from its `complete`/`naturalWidth` (broken images are complete with
+  // zero natural width).
+  const imageRef = useRef<HTMLImageElement>(null);
+  useEffect(() => {
+    if (state.current.state !== 'loading') return;
+    const image = imageRef.current;
+    if (!image || !image.complete) return;
+    updateState(image.naturalWidth > 0 ? 'loaded' : 'error');
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- keyed on requestKey; updateState reads the current ref snapshot.
+  }, [requestKey]);
+
   /* eslint-disable react-hooks/refs -- posterImageState is the synchronous keyed-state snapshot above. */
   return (
     <img
       {...safeRest}
       alt=""
       data-reely-part="poster-image"
+      ref={imageRef}
       data-state={posterImageState}
       decoding={decoding}
       fetchPriority={fetchPriority}

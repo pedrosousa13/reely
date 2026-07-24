@@ -1399,6 +1399,44 @@ test('tracks poster image request state and preserves its explicit image attribu
   expect(onError).toHaveBeenCalledOnce();
 });
 
+test('resolves a cached poster image whose load fired before the handler attached', () => {
+  const { PosterImage } = posterPrimitives;
+  // Simulate the browser's cached-image path: the <img> is already complete
+  // (and decoded) by the time React attaches onLoad, so no load event fires.
+  const completeSpy = vi
+    .spyOn(HTMLImageElement.prototype, 'complete', 'get')
+    .mockReturnValue(true);
+  const naturalWidthSpy = vi
+    .spyOn(HTMLImageElement.prototype, 'naturalWidth', 'get')
+    .mockReturnValue(1280);
+  try {
+    const { container } = render(<PosterImage src="/cached.jpg" />);
+    const image = container.querySelector('img')!;
+    expect(image.getAttribute('data-state')).toBe('loaded');
+  } finally {
+    completeSpy.mockRestore();
+    naturalWidthSpy.mockRestore();
+  }
+});
+
+test('marks a cached but broken poster image as error', () => {
+  const { PosterImage } = posterPrimitives;
+  const completeSpy = vi
+    .spyOn(HTMLImageElement.prototype, 'complete', 'get')
+    .mockReturnValue(true);
+  const naturalWidthSpy = vi
+    .spyOn(HTMLImageElement.prototype, 'naturalWidth', 'get')
+    .mockReturnValue(0);
+  try {
+    const { container } = render(<PosterImage src="/broken.jpg" />);
+    const image = container.querySelector('img')!;
+    expect(image.getAttribute('data-state')).toBe('error');
+  } finally {
+    completeSpy.mockRestore();
+    naturalWidthSpy.mockRestore();
+  }
+});
+
 test('hides the poster only for confirmed playback or the current media frame', async () => {
   const { Poster } = posterPrimitives;
   const handle = createRef<Player.PlayerHandle>();
