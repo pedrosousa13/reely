@@ -8,7 +8,8 @@ import {
   type MediaSessionBinding,
   type MediaSessionLike,
   type PlayerSource,
-  type PlayerState
+  type PlayerState,
+  type TimeRange
 } from '@reely/core';
 import type { NativePlaybackOptions } from '@reely/provider-native';
 import {
@@ -28,7 +29,6 @@ import {
   useState,
   useSyncExternalStore,
   type ComponentPropsWithRef,
-  type ComponentPropsWithoutRef,
   type CSSProperties,
   type ImgHTMLAttributes,
   type ReactNode,
@@ -47,7 +47,7 @@ type SourceTransition = {
 
 export type ViewportProps = ComponentPropsWithRef<'div'>;
 
-export type PosterProps = ComponentPropsWithoutRef<'div'>;
+export type PosterProps = ComponentPropsWithRef<'div'>;
 
 export type ResponsivePoster = {
   readonly src: string;
@@ -74,7 +74,16 @@ export type PosterImageProps = Omit<
 > &
   Partial<ResponsivePoster>;
 
-export type MediaProps = {
+// Standard <video> passthrough, minus the attributes the controller owns:
+// `src` (driven by the resolved source / <source> children), `muted` and
+// `autoPlay` (activation + autoplay policy live in the controller), `preload`
+// (derived from the loading strategy), `poster` (use `nativePoster`), and
+// `children` (Media renders its own <source> set). Passing those would
+// silently desync or bypass the player's state machine, so they're excluded.
+export type MediaProps = Omit<
+  ComponentPropsWithRef<'video'>,
+  'children' | 'src' | 'muted' | 'autoPlay' | 'preload' | 'poster'
+> & {
   readonly nativePoster?: string;
 };
 
@@ -828,8 +837,36 @@ const sourceKey = (source: ReturnType<typeof detectSource>): string =>
     ? JSON.stringify(source.source)
     : 'unsupported-source';
 
-export const Media = ({ nativePoster }: MediaProps) => {
+export const Media = ({
+  nativePoster,
+  ref,
+  style,
+  'aria-label': ariaLabel,
+  ...rest
+}: MediaProps) => {
   const { mediaEligible, preload, registerMedia, source } = usePlayer();
+  // Merge the consumer ref onto the internal registration inside one callback
+  // ref (rather than Viewport's stable-callback + separate `[ref]` effect):
+  // Media is eligibility-gated and mounts its <video> late, so a `[ref]`
+  // effect would run before the element exists and never forward the ref when
+  // it finally mounts. Consumer refs on Media are expected to be stable; the
+  // trade-off is that a volatile (inline) ref re-runs this callback each
+  // render — behavior-preserving, verified to not reload the provider. Only
+  // the native <video> branch attaches this; the iframe mounts aren't a video
+  // element. Declared before the eligibility returns to keep hook order stable.
+  const mediaRef = useCallback(
+    (node: HTMLVideoElement | null) => {
+      registerMedia(node);
+      const consumerCleanup = assignRef(ref, node);
+      if (!node) return;
+      return () => {
+        registerMedia(null);
+        if (consumerCleanup) consumerCleanup();
+        else assignRef(ref, null);
+      };
+    },
+    [registerMedia, ref]
+  );
   if (!mediaEligible || source.status === 'failure') {
     return null;
   }
@@ -877,14 +914,15 @@ export const Media = ({ nativePoster }: MediaProps) => {
 
   return (
     <video
-      aria-label="Reely media"
+      playsInline
+      {...rest}
+      aria-label={ariaLabel ?? 'Reely media'}
       data-reely-part="media"
       key={sourceKey(source)}
       poster={nativePoster}
-      playsInline
       preload={preload}
-      ref={registerMedia}
-      style={{ position: 'relative', zIndex: 0 }}
+      ref={mediaRef}
+      style={{ position: 'relative', zIndex: 0, ...style }}
     >
       {source.source.type === 'video'
         ? source.source.sources.map(({ mimeType, src }, index) => (
@@ -984,19 +1022,21 @@ export const LoadingIndicator = ({
     activation: state.activation,
     buffering: state.buffering
   }));
-  const state =
+  const active =
     activation === 'loading-provider'
       ? 'loading-provider'
       : activation !== 'error' && buffering
         ? 'buffering'
         : null;
-  if (!state) return null;
+  // The live region stays mounted (empty when idle) so a screen reader
+  // announces the buffering/loading transition. A region that mounts already
+  // populated is typically not announced.
   return (
     <div
       {...props}
       aria-live="polite"
       data-reely-part="loading-indicator"
-      data-state={state}
+      data-state={active ?? 'idle'}
       role="status"
       style={{
         ...style,
@@ -1006,8 +1046,10 @@ export const LoadingIndicator = ({
         pointerEvents: 'none'
       }}
     >
-      {children ??
-        (state === 'loading-provider' ? 'Loading video' : 'Buffering')}
+      {active
+        ? (children ??
+          (active === 'loading-provider' ? 'Loading video' : 'Buffering'))
+        : null}
     </div>
   );
 };
@@ -1063,12 +1105,27 @@ export const PosterImage = ({
     rerender((value) => value + 1);
   };
 
+  // Cached images can finish loading before React attaches onLoad/onError, so
+  // those events never fire and `data-state` would stay 'loading' forever.
+  // On mount and whenever the request changes, resolve an already-complete
+  // image from its `complete`/`naturalWidth` (broken images are complete with
+  // zero natural width).
+  const imageRef = useRef<HTMLImageElement>(null);
+  useEffect(() => {
+    if (state.current.state !== 'loading') return;
+    const image = imageRef.current;
+    if (!image || !image.complete) return;
+    updateState(image.naturalWidth > 0 ? 'loaded' : 'error');
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- keyed on requestKey; updateState reads the current ref snapshot.
+  }, [requestKey]);
+
   /* eslint-disable react-hooks/refs -- posterImageState is the synchronous keyed-state snapshot above. */
   return (
     <img
       {...safeRest}
       alt=""
       data-reely-part="poster-image"
+      ref={imageRef}
       data-state={posterImageState}
       decoding={decoding}
       fetchPriority={fetchPriority}
@@ -1133,8 +1190,8 @@ export const PlayButton = ({
     <button
       {...props}
       aria-label={isPlaying ? 'Pause' : 'Play'}
+      aria-pressed={isPlaying}
       data-autoplay-state={autoplay}
-      data-playback-state={playback}
       data-provider={provider ?? undefined}
       data-reely-part="play-button"
       data-state={playback}
@@ -1213,7 +1270,6 @@ export const VolumeSlider = ({
       {...props}
       aria-label={ariaLabel ?? 'Volume'}
       aria-valuetext={`${percent}%`}
-      data-muted={muted ? '' : undefined}
       data-provider={provider ?? undefined}
       data-reely-part="volume-slider"
       data-state={muted ? 'muted' : 'unmuted'}
@@ -1235,42 +1291,71 @@ export const VolumeSlider = ({
   );
 };
 
-export type SeekSliderProps = ComponentPropsWithRef<'div'>;
+export type SeekSliderProps = ComponentPropsWithRef<'div'> & {
+  // Escape hatch onto the inner range control (aria-label, step, disabled,
+  // id/name, data-*, onChange, style). The library keeps ownership of the
+  // controlled attributes (value/min/max/type/aria-valuetext); consumer
+  // onChange is chained after the seek.
+  readonly inputProps?: ComponentPropsWithRef<'input'>;
+};
 
-export const SeekSlider = ({ children, style, ...props }: SeekSliderProps) => {
-  const { buffered, currentTime, duration, provider, status } = usePlayerState(
-    (state) => ({
+// The scrubbable range: [0, duration] for VOD, or the seekable window extent
+// for live DVR where duration is null but a moving window is present.
+const seekWindow = (
+  duration: number | null,
+  seekable: ReadonlyArray<TimeRange>
+): { readonly start: number; readonly end: number } | null => {
+  if (typeof duration === 'number' && duration > 0) {
+    return { start: 0, end: duration };
+  }
+  if (seekable.length === 0) return null;
+  const start = Math.min(...seekable.map((range) => range.start));
+  const end = Math.max(...seekable.map((range) => range.end));
+  return end > start ? { start, end } : null;
+};
+
+export const SeekSlider = ({
+  children,
+  inputProps,
+  style,
+  ...props
+}: SeekSliderProps) => {
+  const { buffered, currentTime, duration, provider, seekable, status } =
+    usePlayerState((state) => ({
       buffered: state.buffered,
       currentTime: state.currentTime,
       duration: state.duration,
       provider: state.provider,
+      seekable: state.seekable,
       status: state.capabilities.seek.status
-    })
-  );
+    }));
   const { controller } = usePlayer();
   if (status !== 'available') return null;
   const hasDuration = typeof duration === 'number' && duration > 0;
-  const max = hasDuration ? duration : 0;
-  const value = hasDuration ? Math.min(currentTime, duration) : 0;
+  const window = seekWindow(duration, seekable);
+  const min = window ? window.start : 0;
+  const max = window ? window.end : 0;
+  const span = max - min;
+  const value = window ? Math.min(Math.max(currentTime, min), max) : 0;
 
   return (
     <div
       {...props}
       data-provider={provider ?? undefined}
       data-reely-part="seek-slider"
-      data-state={hasDuration ? 'ready' : 'idle'}
+      data-state={window ? 'ready' : 'idle'}
       style={{ position: 'relative', minHeight: 44, ...style }}
     >
       <div aria-hidden="true" data-reely-part="seek-buffered">
-        {hasDuration
+        {window
           ? buffered.map((range, index) => (
               <div
                 data-reely-part="seek-buffered-range"
                 key={`${range.start}:${range.end}:${index}`}
                 style={{
                   position: 'absolute',
-                  left: `${(range.start / duration) * 100}%`,
-                  width: `${((range.end - range.start) / duration) * 100}%`
+                  left: `${(Math.max(range.start - min, 0) / span) * 100}%`,
+                  width: `${((range.end - range.start) / span) * 100}%`
                 }}
               />
             ))
@@ -1278,6 +1363,8 @@ export const SeekSlider = ({ children, style, ...props }: SeekSliderProps) => {
       </div>
       <input
         aria-label="Seek"
+        step={1}
+        {...inputProps}
         aria-valuetext={
           hasDuration
             ? `${formatTime(value)} of ${formatTime(duration)}`
@@ -1285,13 +1372,13 @@ export const SeekSlider = ({ children, style, ...props }: SeekSliderProps) => {
         }
         data-reely-part="seek-slider-input"
         max={max}
-        min={0}
+        min={min}
         onChange={(event) => {
           const next = Number(event.currentTarget.value);
           if (Number.isFinite(next)) void controller.seekTo(next);
+          inputProps?.onChange?.(event);
         }}
-        step={1}
-        style={{ width: '100%', minHeight: 44 }}
+        style={{ width: '100%', minHeight: 44, ...inputProps?.style }}
         type="range"
         value={value}
       />
@@ -1557,6 +1644,7 @@ export const Controls = ({
         }
         case 'm':
         case 'M':
+          if (volumeStatus !== 'available') return;
           event.preventDefault();
           void controller.toggleMuted();
           return;
@@ -1644,6 +1732,11 @@ export const Controls = ({
         if (!global) handleShortcut(event);
       }}
       ref={setRef}
+      // Deliberately role="group", not "toolbar": the region owns media
+      // shortcuts (Arrow keys seek/adjust volume, J/L/K/M/F, Space) rather
+      // than roving-tabindex toolbar navigation. Native controls inside
+      // (buttons, links, range inputs) keep their own key handling; the
+      // shortcut handler skips those targets.
       role="group"
       style={style}
       tabIndex={tabIndex ?? 0}

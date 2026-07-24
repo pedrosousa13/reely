@@ -43,6 +43,38 @@ export default meta;
 
 type Story = StoryObj<typeof meta>;
 
+/** No source configured: the image idles without requesting anything. */
+export const Idle: Story = {
+  render: () => (
+    <Frame>
+      <Player.Poster>
+        <Player.PosterImage />
+      </Player.Poster>
+    </Frame>
+  ),
+  play: async ({ canvasElement }) => {
+    await expect(image(canvasElement)).toHaveAttribute('data-state', 'idle');
+  }
+};
+
+/**
+ * The dev server holds `/__reely__/pending.png` open forever, so the image
+ * stays in `loading` deterministically. In a static Storybook build the URL
+ * 404s and this story falls through to the error state instead.
+ */
+export const Loading: Story = {
+  render: () => (
+    <Frame>
+      <Player.Poster>
+        <Player.PosterImage src="/__reely__/pending.png" />
+      </Player.Poster>
+    </Frame>
+  ),
+  play: async ({ canvasElement }) => {
+    await expect(image(canvasElement)).toHaveAttribute('data-state', 'loading');
+  }
+};
+
 export const Loaded: Story = {
   render: () => (
     <Frame>
@@ -54,6 +86,23 @@ export const Loaded: Story = {
   play: async ({ canvasElement }) => {
     await waitFor(() =>
       expect(image(canvasElement)).toHaveAttribute('data-state', 'loaded')
+    );
+  }
+};
+
+/** An unparsable data URI fails to decode without touching the network. */
+export const ErrorState: Story = {
+  name: 'Error',
+  render: () => (
+    <Frame>
+      <Player.Poster>
+        <Player.PosterImage src="data:image/png;base64,AAAA" />
+      </Player.Poster>
+    </Frame>
+  ),
+  play: async ({ canvasElement }) => {
+    await waitFor(() =>
+      expect(image(canvasElement)).toHaveAttribute('data-state', 'error')
     );
   }
 };

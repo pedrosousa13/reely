@@ -558,6 +558,35 @@ test('reports picture-in-picture as unavailable without browser support', async 
   });
 });
 
+test('detaches the native media source on destroy to abort buffering', async () => {
+  const { media, provider } = createHarness(stubNativeHlsSupport);
+  await provider.attach();
+  await provider.load();
+  expect(media.getAttribute('src')).toBe('/hls/master.m3u8');
+
+  provider.destroy();
+
+  expect(media.getAttribute('src')).toBeNull();
+});
+
+test('exposes the AirPlay picker through the wrapper on the native engine', async () => {
+  const { media, patches, provider } = createHarness(stubNativeHlsSupport);
+  const showPicker = vi.fn();
+  Object.defineProperty(media, 'webkitShowPlaybackTargetPicker', {
+    configurable: true,
+    value: showPicker
+  });
+
+  await provider.attach();
+  await provider.load();
+
+  expect(patches.at(-1)).toMatchObject({
+    capabilities: { airPlay: { status: 'available' } }
+  });
+  await expect(provider.showAirPlayPicker?.()).resolves.toEqual({ ok: true });
+  expect(showPicker).toHaveBeenCalledOnce();
+});
+
 test('exposes fullscreen through the wrapper', async () => {
   const { media, patches, provider } = createHarness(stubMseOnlySupport);
   const requestFullscreen = vi.fn().mockResolvedValue(undefined);

@@ -161,11 +161,6 @@ export type ProviderStateListener = (
   event?: ProviderEvent
 ) => void;
 
-export type ParsedSource = {
-  type: 'mp4';
-  url: string;
-};
-
 export type VideoFileSource = {
   type: 'video';
   sources: ReadonlyArray<{ src: string; mimeType: string }>;
@@ -334,16 +329,6 @@ const unsubscribeSafely = (unsubscribe: (() => void) | undefined): void => {
   } catch {
     // Provider cleanup must not escape the controller boundary.
   }
-};
-
-export const parseSource = (source: string): ParsedSource => {
-  if (!/\.mp4(?:$|[?#])/i.test(source)) {
-    throw new Error(
-      'Only MP4 sources are supported by the native tracer bullet.'
-    );
-  }
-
-  return { type: 'mp4', url: source };
 };
 
 const explicitObjectGuidance =
@@ -746,7 +731,18 @@ export class PlayerController {
       listener(event as PlayerEventFor<Type>);
     listeners.add(keyedListener);
     this.#eventListeners.set(type, listeners);
-    return () => listeners.delete(keyedListener);
+    return () => {
+      listeners.delete(keyedListener);
+      // Only drop the map entry if it still holds this (now-empty) set; a
+      // re-registration under the same type installs a fresh set that a
+      // duplicated unsubscribe must not delete.
+      if (
+        this.#eventListeners.get(type) === listeners &&
+        listeners.size === 0
+      ) {
+        this.#eventListeners.delete(type);
+      }
+    };
   };
 
   play = (): Promise<CommandResult> => this.playWithOrigin('api');
@@ -1277,6 +1273,9 @@ export const createMediaSessionCoordinator = (
     }
     session.metadata = null;
     session.playbackState = 'none';
+    if (typeof session.setPositionState === 'function') {
+      session.setPositionState(undefined);
+    }
   };
 
   const wireHandlers = (actions: MediaSessionActions): void => {
@@ -1376,6 +1375,7 @@ export const bindMediaSession = (
   });
 
   let lastPlayback: PlaybackState | undefined;
+  let positionCleared = false;
 
   const unsubscribe = controller.subscribe((state) => {
     if (state.playback !== lastPlayback) {
@@ -1389,6 +1389,12 @@ export const bindMediaSession = (
         position: state.currentTime,
         playbackRate: state.playbackRate
       });
+      positionCleared = false;
+    } else if (!positionCleared) {
+      // Live/unknown duration: clear the stale finite position once (not every
+      // tick) so the lock screen doesn't keep the last VOD position pinned.
+      root.setPositionState(null);
+      positionCleared = true;
     }
   });
 

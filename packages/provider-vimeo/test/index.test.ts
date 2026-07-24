@@ -418,6 +418,16 @@ test('clamps seekBy to the confirmed timeline', async () => {
   expect(player.setCurrentTime).toHaveBeenLastCalledWith(0);
 });
 
+test('clamps seekTo to the confirmed timeline', async () => {
+  const { provider, sdk } = await setup({ fake: { duration: 60 } });
+  const player = sdk.instances[0]!;
+  player.emit('timeupdate', { duration: 60, percent: 0.5, seconds: 30 });
+  await provider.seekTo(100);
+  expect(player.setCurrentTime).toHaveBeenLastCalledWith(60);
+  await provider.seekTo(-100);
+  expect(player.setCurrentTime).toHaveBeenLastCalledWith(0);
+});
+
 // --- captions ---
 
 test('selects a discovered caption track by language', async () => {

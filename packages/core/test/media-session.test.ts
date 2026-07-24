@@ -254,3 +254,66 @@ test('position state is reported for the owning root when supported', () => {
   expect(setPositionState).toHaveBeenCalled();
   expect(positionStates.at(-1)).toMatchObject({ duration: 120, position: 5 });
 });
+
+test('clears position state when the stream goes live (duration null)', () => {
+  const { session, positionStates } = createSession();
+  const coordinator = createMediaSessionCoordinator(session);
+  const controller = new PlayerController();
+  const { emit, provider } = createProvider();
+  controller.setProvider(provider);
+  bindMediaSession(controller, coordinator, { metadata: { title: 'One' } });
+
+  emit({ playback: 'playing', duration: 120, currentTime: 5, playbackRate: 1 });
+  expect(positionStates.at(-1)).toMatchObject({ duration: 120, position: 5 });
+
+  emit({ duration: null, currentTime: 6 });
+  expect(positionStates.at(-1)).toBeUndefined();
+
+  // Subsequent live ticks must not re-clear an already-cleared position.
+  const afterFirstClear = positionStates.length;
+  emit({ duration: null, currentTime: 7 });
+  emit({ duration: null, currentTime: 8 });
+  expect(positionStates.length).toBe(afterFirstClear);
+});
+
+test('clears position state when the owning root is released', () => {
+  const { session, positionStates } = createSession();
+  const coordinator = createMediaSessionCoordinator(session);
+  const controller = new PlayerController();
+  const { emit, provider } = createProvider();
+  controller.setProvider(provider);
+  const binding = bindMediaSession(controller, coordinator, {
+    metadata: { title: 'One' }
+  });
+
+  emit({ playback: 'playing', duration: 120, currentTime: 5, playbackRate: 1 });
+  binding.release();
+
+  expect(positionStates.at(-1)).toBeUndefined();
+});
+
+test('on() keeps a re-registered listener after a duplicated unsubscribe', () => {
+  const controller = new PlayerController();
+  const { emit, provider } = createProvider();
+  controller.setProvider(provider);
+
+  const first: string[] = [];
+  const off1 = controller.on('play', () => first.push('first'));
+  off1();
+
+  // A new listener for the same type registers a fresh internal set.
+  const second: string[] = [];
+  controller.on('play', () => second.push('second'));
+
+  // Duplicated unsubscribe of the already-removed listener must not disturb
+  // the new registration.
+  off1();
+
+  emit(
+    { playback: 'playing' },
+    { type: 'play', origin: 'user', detail: undefined }
+  );
+
+  expect(first).toEqual([]);
+  expect(second).toEqual(['second']);
+});

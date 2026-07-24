@@ -39,6 +39,11 @@ type WebKitHTMLVideoElement = HTMLVideoElement & {
   readonly webkitSetPresentationMode?: (mode: WebKitPresentationMode) => void;
   readonly webkitPresentationMode?: WebKitPresentationMode;
   readonly webkitShowPlaybackTargetPicker?: () => void;
+  // Present-but-unused: AirPlay is fire-and-forget today. Surfacing an active
+  // wireless-route flag needs a new observable state field (a route-change
+  // subscription + PlayerState surface), which is a feature, not hardening —
+  // deferred rather than added here. The `webkitcurrentplaybacktargetiswireless
+  // changed` event would drive it.
   readonly webkitCurrentPlaybackTargetIsWireless?: boolean;
   readonly disableRemotePlayback?: boolean;
 };

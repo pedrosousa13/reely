@@ -58,6 +58,40 @@ export const Playing: Story = {
   }
 };
 
+/**
+ * Autoplay was blocked by the browser: the configured autoplay attempt hits a
+ * failing `play()` with `reason: 'blocked'`, so the button surfaces
+ * `data-autoplay-state="blocked"` for styling a "tap to play" affordance.
+ */
+export const AutoplayBlocked: Story = {
+  parameters: {
+    player: {
+      state: ready().player.state,
+      autoplay: 'audible',
+      playResult: { ok: false, reason: 'blocked' }
+    }
+  },
+  play: async ({ canvas }) => {
+    const button = await canvas.findByRole('button', { name: 'Play' });
+    await expect(button).toHaveAttribute('data-autoplay-state', 'blocked');
+  }
+};
+
+/** Autoplay was attempted and failed for a non-policy (provider) reason. */
+export const AutoplayFailed: Story = {
+  parameters: {
+    player: {
+      state: ready().player.state,
+      autoplay: 'audible',
+      playResult: { ok: false, reason: 'provider-error' }
+    }
+  },
+  play: async ({ canvas }) => {
+    const button = await canvas.findByRole('button', { name: 'Play' });
+    await expect(button).toHaveAttribute('data-autoplay-state', 'failed');
+  }
+};
+
 /** Focus behavior: the native button is reachable by keyboard. */
 export const KeyboardFocusable: Story = {
   parameters: ready({}, { playback: 'paused' }),

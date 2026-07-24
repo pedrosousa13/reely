@@ -41,7 +41,7 @@ test('blocked audible autoplay waits for a user retry without muting', async ({
   await playButton.click();
 
   await expect(page.getByRole('button', { name: 'Pause' })).toHaveAttribute(
-    'data-playback-state',
+    'data-state',
     'playing'
   );
   await expect(page.getByLabel('Reely media')).toHaveJSProperty('muted', false);

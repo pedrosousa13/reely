@@ -94,6 +94,21 @@ const verifyReadonlyStateTypes = (
   state.buffered[0]!.end = 10;
 };
 
+// Compile-time guard: Media excludes the controller-owned <video> attributes
+// so a consumer can't silently desync or bypass the player's state machine.
+const verifyMediaPropsExclusions = (): Player.MediaProps[] => [
+  // @ts-expect-error src is driven by the resolved source / <source> children.
+  { src: '/clip.mp4' },
+  // @ts-expect-error muted is owned by the controller (volume/activation).
+  { muted: true },
+  // @ts-expect-error autoPlay is owned by the controller (autoplay policy).
+  { autoPlay: true },
+  // @ts-expect-error use nativePoster instead of poster.
+  { poster: '/poster.jpg' },
+  // @ts-expect-error preload is derived from the loading strategy.
+  { preload: 'none' }
+];
+
 const confirmMetadataReady = (media: HTMLVideoElement): void => {
   Object.defineProperty(HTMLMediaElement, 'HAVE_METADATA', {
     configurable: true,
@@ -784,9 +799,7 @@ test('keeps confirmed paused state when the media play command rejects', async (
 
     expect(unhandledRejections).toEqual([]);
     expect(
-      screen
-        .getByRole('button', { name: 'Play' })
-        .getAttribute('data-playback-state')
+      screen.getByRole('button', { name: 'Play' }).getAttribute('data-state')
     ).toBe('paused');
   } finally {
     process.off('unhandledRejection', onUnhandledRejection);
@@ -842,9 +855,7 @@ test('remounts media and resets confirmed playing state after a transition to HL
   expect(remounted).not.toBe(media);
   expect(remounted.querySelectorAll('source')).toHaveLength(0);
   expect(
-    screen
-      .getByRole('button', { name: 'Play' })
-      .getAttribute('data-playback-state')
+    screen.getByRole('button', { name: 'Play' }).getAttribute('data-state')
   ).toBe('paused');
 });
 
@@ -884,9 +895,7 @@ test.each([
 
     expect(screen.queryByLabelText('Reely media')).toBeNull();
     expect(
-      screen
-        .getByRole('button', { name: 'Play' })
-        .getAttribute('data-playback-state')
+      screen.getByRole('button', { name: 'Play' }).getAttribute('data-state')
     ).toBe('paused');
   }
 );
@@ -923,6 +932,7 @@ test('exposes stable actions and a ref handle backed by the Root controller', ()
     expect(event.detail.volume).toBeTypeOf('number');
   });
   expect(verifyReadonlyStateTypes).toBeTypeOf('function');
+  expect(verifyMediaPropsExclusions).toBeTypeOf('function');
 });
 
 test('keeps the imperative handle backed by the full PlayerController', () => {
@@ -1399,6 +1409,44 @@ test('tracks poster image request state and preserves its explicit image attribu
   expect(onError).toHaveBeenCalledOnce();
 });
 
+test('resolves a cached poster image whose load fired before the handler attached', () => {
+  const { PosterImage } = posterPrimitives;
+  // Simulate the browser's cached-image path: the <img> is already complete
+  // (and decoded) by the time React attaches onLoad, so no load event fires.
+  const completeSpy = vi
+    .spyOn(HTMLImageElement.prototype, 'complete', 'get')
+    .mockReturnValue(true);
+  const naturalWidthSpy = vi
+    .spyOn(HTMLImageElement.prototype, 'naturalWidth', 'get')
+    .mockReturnValue(1280);
+  try {
+    const { container } = render(<PosterImage src="/cached.jpg" />);
+    const image = container.querySelector('img')!;
+    expect(image.getAttribute('data-state')).toBe('loaded');
+  } finally {
+    completeSpy.mockRestore();
+    naturalWidthSpy.mockRestore();
+  }
+});
+
+test('marks a cached but broken poster image as error', () => {
+  const { PosterImage } = posterPrimitives;
+  const completeSpy = vi
+    .spyOn(HTMLImageElement.prototype, 'complete', 'get')
+    .mockReturnValue(true);
+  const naturalWidthSpy = vi
+    .spyOn(HTMLImageElement.prototype, 'naturalWidth', 'get')
+    .mockReturnValue(0);
+  try {
+    const { container } = render(<PosterImage src="/broken.jpg" />);
+    const image = container.querySelector('img')!;
+    expect(image.getAttribute('data-state')).toBe('error');
+  } finally {
+    completeSpy.mockRestore();
+    naturalWidthSpy.mockRestore();
+  }
+});
+
 test('hides the poster only for confirmed playback or the current media frame', async () => {
   const { Poster } = posterPrimitives;
   const handle = createRef<Player.PlayerHandle>();
@@ -1620,6 +1668,66 @@ test('forwards nativePoster only to native videos and server-renders poster mark
   expect(markup).toContain('srcSet="/server-2x.jpg 2x"');
   expect(markup).toContain('sizes="100vw"');
   expect(markup).toContain('alt=""');
+});
+
+test('forwards a ref, custom attributes, style, and aria-label to the native video', () => {
+  const ref = createRef<HTMLVideoElement>();
+  render(
+    <LegacyRoot source="/clip.mp4">
+      <Player.Media
+        aria-label="Main video"
+        className="hero-video"
+        id="hero"
+        ref={ref}
+        style={{ opacity: 0.5 }}
+      />
+    </LegacyRoot>
+  );
+
+  const video = ref.current!;
+  expect(video.tagName).toBe('VIDEO');
+  expect(video.getAttribute('aria-label')).toBe('Main video');
+  expect(video.className).toBe('hero-video');
+  expect(video.id).toBe('hero');
+  expect(video.style.opacity).toBe('0.5');
+  // Library-owned attributes remain intact alongside the passthrough.
+  expect(video.getAttribute('data-reely-part')).toBe('media');
+});
+
+test('an inline ref on Media does not reload the provider on parent re-renders', () => {
+  const loadSpy = vi.spyOn(HTMLMediaElement.prototype, 'load');
+  const Harness = () => {
+    const [tick, setTick] = useState(0);
+    return (
+      <div>
+        <button onClick={() => setTick((value) => value + 1)}>tick</button>
+        <LegacyRoot source="/clip.mp4">
+          <Player.Media data-tick={tick} ref={() => undefined} />
+        </LegacyRoot>
+      </div>
+    );
+  };
+  const { getByText } = render(<Harness />);
+  const loadsAfterMount = loadSpy.mock.calls.length;
+
+  fireEvent.click(getByText('tick'));
+  fireEvent.click(getByText('tick'));
+  fireEvent.click(getByText('tick'));
+
+  // A volatile consumer ref must not churn the internal media registration,
+  // which would tear down and reload the provider on every render.
+  expect(loadSpy.mock.calls.length).toBe(loadsAfterMount);
+});
+
+test('forwards a ref to the poster container', () => {
+  const { Poster } = posterPrimitives;
+  const ref = createRef<HTMLDivElement>();
+  render(
+    <Poster ref={ref}>
+      <span>Poster</span>
+    </Poster>
+  );
+  expect(ref.current?.getAttribute('data-reely-part')).toBe('poster');
 });
 
 test('tolerates an inline callback ref through unrelated parent re-renders', () => {

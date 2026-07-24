@@ -595,7 +595,11 @@ export const createVimeoProvider = (
     seekTo: (time) => {
       if (!Number.isFinite(time))
         return Promise.resolve({ ok: false, reason: 'provider-error' });
-      return runCommand((player) => player.setCurrentTime(time));
+      const target = Math.max(
+        0,
+        duration === null ? time : Math.min(duration, time)
+      );
+      return runCommand((player) => player.setCurrentTime(target));
     },
     seekBy: (offset) => {
       if (!Number.isFinite(offset))

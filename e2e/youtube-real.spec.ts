@@ -27,11 +27,9 @@ test(
     // provider to become ready, and accept a confirmed playing state when the
     // browser allows it.
     const playButton = page.getByRole('button', { name: /Play|Pause/ });
-    await expect(playButton).toHaveAttribute(
-      'data-playback-state',
-      /playing|paused/,
-      { timeout: 30_000 }
-    );
+    await expect(playButton).toHaveAttribute('data-state', /playing|paused/, {
+      timeout: 30_000
+    });
     await expect(activationButton).toBeHidden();
   }
 );

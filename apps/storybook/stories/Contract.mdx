@@ -13,9 +13,13 @@ Every primitive exposes a stable styling/testing contract via data attributes.
 - **`data-state`** — the component's derived state (e.g. `paused`/`playing`,
   `muted`/`unmuted`, `idle`/`ready`, `loading`/`loaded`/`error`,
   `global`/`scoped`, or the activation state).
-- **`data-provider`** — present on primitives that read the active provider
-  (it carries the active provider name, or is absent when no provider is
-  attached).
+- **`data-provider`** — carries the active provider name, or is absent when
+  no provider is attached. By design it appears only on the provider-bound
+  control primitives (`play-button`, `mute-button`, `volume-slider`,
+  `seek-slider`, `time`, `fullscreen-button`, `pip-button`, `controls`), not
+  on the structural/activation parts (`viewport`, `poster`, `poster-image`,
+  `media`, `activation`, `loading-indicator`), which don't read provider
+  state and so avoid re-rendering when it changes.
 
 Style and query against these attributes rather than internal class names.
 

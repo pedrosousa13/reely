@@ -124,6 +124,7 @@ describe('PlayButton', () => {
     const button = screen.getByRole('button', { name: 'Play' });
     expect(button.tagName).toBe('BUTTON');
     expect(attr(button, 'type')).toBe('button');
+    expect(attr(button, 'aria-pressed')).toBe('false');
     fireEvent.click(button);
     expect(spies.play).toHaveBeenCalledTimes(1);
   });
@@ -134,7 +135,7 @@ describe('PlayButton', () => {
     expect(attr(button, 'data-reely-part')).toBe('play-button');
     expect(attr(button, 'data-state')).toBe('playing');
     expect(attr(button, 'data-provider')).toBe('native');
-    expect(attr(button, 'data-playback-state')).toBe('playing');
+    expect(attr(button, 'aria-pressed')).toBe('true');
   });
 
   test('passes className, style and ref through, with a 44px target', () => {
@@ -234,6 +235,10 @@ describe('VolumeSlider', () => {
     const slider = screen.getByRole('slider', { name: 'Volume' });
     expect((slider as HTMLInputElement).value).toBe('0');
     expect(attr(slider, 'aria-valuetext')).toBe('0%');
+    // Muted is expressed only through data-state; the redundant data-muted
+    // presence attribute is gone.
+    expect(attr(slider, 'data-state')).toBe('muted');
+    expect(slider.hasAttribute('data-muted')).toBe(false);
   });
 });
 
@@ -291,6 +296,70 @@ describe('SeekSlider', () => {
     renderWithPlayer(<Player.SeekSlider />, seekReady());
     const slider = screen.getByRole('slider', { name: 'Seek' });
     expect((slider as HTMLInputElement).style.minHeight).toBe('44px');
+  });
+
+  test('forwards inputProps to the range control and chains onChange', () => {
+    const onChange = vi.fn();
+    const { spies } = renderWithPlayer(
+      <Player.SeekSlider
+        inputProps={{
+          step: 5,
+          'aria-label': 'Scrub',
+          name: 'scrub',
+          onChange
+        }}
+      />,
+      seekReady()
+    );
+    const slider = screen.getByRole('slider', { name: 'Scrub' });
+    expect(attr(slider, 'step')).toBe('5');
+    expect(attr(slider, 'name')).toBe('scrub');
+    fireEvent.change(slider, { target: { value: '75' } });
+    expect(spies.seekTo).toHaveBeenCalledWith(75);
+    expect(onChange).toHaveBeenCalledOnce();
+  });
+
+  const liveWindow = (patch: ProviderStatePatch = {}): ProviderStatePatch => ({
+    ...capabilities({ seek: available }),
+    duration: null,
+    currentTime: 50,
+    seekable: [{ start: 20, end: 80 }],
+    ...patch
+  });
+
+  test('scrubs a live DVR window when duration is null but seekable exists', () => {
+    const { container } = renderWithPlayer(<Player.SeekSlider />, liveWindow());
+    const slider = screen.getByRole('slider', { name: 'Seek' });
+    expect(attr(slider, 'min')).toBe('20');
+    expect(attr(slider, 'max')).toBe('80');
+    expect((slider as HTMLInputElement).value).toBe('50');
+    expect(attr(slider, 'aria-valuetext')).toBe('0:50');
+    expect(
+      attr(
+        container.querySelector('[data-reely-part="seek-slider"]')!,
+        'data-state'
+      )
+    ).toBe('ready');
+  });
+
+  test('seeks within a live DVR window on change', () => {
+    const { spies } = renderWithPlayer(<Player.SeekSlider />, liveWindow());
+    const slider = screen.getByRole('slider', { name: 'Seek' });
+    fireEvent.change(slider, { target: { value: '65' } });
+    expect(spies.seekTo).toHaveBeenCalledWith(65);
+  });
+
+  test('positions buffered ranges relative to a live DVR window', () => {
+    const { container } = renderWithPlayer(
+      <Player.SeekSlider />,
+      liveWindow({ buffered: [{ start: 35, end: 50 }] })
+    );
+    const range = container.querySelector<HTMLElement>(
+      '[data-reely-part="seek-buffered-range"]'
+    )!;
+    // window span 60, offset 20: left (35-20)/60=25%, width 15/60=25%.
+    expect(range.style.left).toBe('25%');
+    expect(range.style.width).toBe('25%');
   });
 });
 
@@ -503,6 +572,31 @@ describe('Controls container and scoped shortcuts', () => {
     expect(spies.requestFullscreen).toHaveBeenCalledTimes(1);
   });
 
+  test('does not mute via M when volume control is unavailable', () => {
+    const { container, spies } = renderWithPlayer(
+      <Player.Controls>
+        <Player.Time />
+      </Player.Controls>,
+      {
+        ...capabilities({
+          seek: available,
+          setVolume: unavailable,
+          fullscreen: available
+        }),
+        duration: 100,
+        currentTime: 30,
+        volume: 0.5,
+        playback: 'paused'
+      }
+    );
+    const region = container.querySelector<HTMLElement>(
+      '[data-reely-part="controls"]'
+    )!;
+    region.focus();
+    fireEvent.keyDown(region, { key: 'm' });
+    expect(spies.mute).not.toHaveBeenCalled();
+  });
+
   test('ignores shortcuts originating from editable fields', () => {
     const { container, spies } = renderWithPlayer(
       <Player.Controls>
@@ -517,6 +611,34 @@ describe('Controls container and scoped shortcuts', () => {
     fireEvent.keyDown(input, { key: 'm' });
     expect(spies.play).not.toHaveBeenCalled();
     expect(spies.mute).not.toHaveBeenCalled();
+  });
+
+  test('leaves arrow keys to a focused slider input instead of the seek/volume shortcuts', () => {
+    const { container, spies } = renderWithPlayer(
+      <Player.Controls>
+        <Player.SeekSlider />
+        <Player.VolumeSlider />
+      </Player.Controls>,
+      controlsState()
+    );
+    const seekInput = container.querySelector<HTMLInputElement>(
+      '[data-reely-part="seek-slider-input"]'
+    )!;
+    seekInput.focus();
+    fireEvent.keyDown(seekInput, { key: 'ArrowRight' });
+    fireEvent.keyDown(seekInput, { key: 'ArrowLeft' });
+
+    const volumeInput = container.querySelector<HTMLInputElement>(
+      '[data-reely-part="volume-slider"]'
+    )!;
+    volumeInput.focus();
+    fireEvent.keyDown(volumeInput, { key: 'ArrowUp' });
+    fireEvent.keyDown(volumeInput, { key: 'ArrowDown' });
+
+    // The region's shortcut handler bails on native inputs, so the sliders'
+    // own arrow-key stepping owns the interaction (no double-handling).
+    expect(spies.seekBy).not.toHaveBeenCalled();
+    expect(spies.setVolume).not.toHaveBeenCalled();
   });
 
   test('ignores shortcuts while an open menu has focus', () => {
