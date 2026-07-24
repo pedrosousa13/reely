@@ -1,6 +1,9 @@
 import { expect, test, type Page } from '@playwright/test';
 
-const hlsLibraryChunk = /\/assets\/hls-[^/]*\.js$/;
+// Under `storybook dev`, Vite's dependency optimizer serves hls.js from its
+// deps cache (e.g. /node_modules/.cache/storybook/<version>/<hash>/sb-vite/deps/hls__js.js),
+// not the production build's content-hashed /assets/hls-*.js chunk name.
+const hlsLibraryChunk = /\/deps\/hls__js\.js$/;
 
 const recordRequests = (page: Page): string[] => {
   const requests: string[] = [];
