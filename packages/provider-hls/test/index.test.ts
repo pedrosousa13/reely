@@ -558,6 +558,17 @@ test('reports picture-in-picture as unavailable without browser support', async 
   });
 });
 
+test('detaches the native media source on destroy to abort buffering', async () => {
+  const { media, provider } = createHarness(stubNativeHlsSupport);
+  await provider.attach();
+  await provider.load();
+  expect(media.getAttribute('src')).toBe('/hls/master.m3u8');
+
+  provider.destroy();
+
+  expect(media.getAttribute('src')).toBeNull();
+});
+
 test('exposes the AirPlay picker through the wrapper on the native engine', async () => {
   const { media, patches, provider } = createHarness(stubNativeHlsSupport);
   const showPicker = vi.fn();

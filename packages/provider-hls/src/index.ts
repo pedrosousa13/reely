@@ -536,6 +536,12 @@ export const createHlsProvider = (
       teardownHls();
       unsubscribeNative();
       native.destroy();
+      if (engine === 'native') {
+        // The native engine owns media.src (React sets none on the HLS
+        // <video>); detach it so the element stops buffering the manifest.
+        media.removeAttribute('src');
+        media.load();
+      }
       listeners.clear();
     },
     subscribe: (listener) => {
