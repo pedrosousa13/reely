@@ -12,9 +12,14 @@ const youtubeExampleUrl = 'https://www.youtube.com/watch?v=M7lc1UVf-VE';
 const vimeoExampleUrl = 'https://vimeo.com/76979871';
 
 /**
- * Story args mirror the `apps/docs` `PlayerFixture`'s `URLSearchParams` reads
- * one-for-one (see `apps/docs/src/main.tsx`) so the same source-selection
- * branching runs against Storybook args instead of the query string.
+ * Storybook's `?args=k:v;...` URL parser drops values containing a literal
+ * `.` (e.g. `hls.js`) and boolean-coerces args that default to `false`
+ * (autoplay), so e2e specs can't reliably drive this fixture through args.
+ * Instead, the fixture reads `window.location.search` directly at render
+ * time, mirroring the `apps/docs` `PlayerFixture`'s `URLSearchParams` reads
+ * one-for-one (see `apps/docs/src/main.tsx`). The `argTypes`/`Default.args`
+ * below remain only as manager-UI documentation/defaults; they do not drive
+ * the rendered props.
  */
 type PlayerFixtureArgs = {
   readonly source?: string;
@@ -213,23 +218,38 @@ const LiveControls = () => {
   );
 };
 
-const PlayerFixture = ({ args }: { readonly args: PlayerFixtureArgs }) => {
-  const {
-    source: sourceParameter,
-    engine: hlsEngine,
-    activationSource: activationSourceParameter,
-    autoplay,
-    loading,
-    preload,
-    defaultMuted,
-    airplay,
-    sourceChange: sourceChangeParameter
-  } = args;
-
+const PlayerFixture = () => {
+  const parameters = new URLSearchParams(window.location.search);
+  const autoplayParameter = parameters.get('autoplay');
+  const autoplay: Player.RootProps['autoplay'] =
+    autoplayParameter === 'muted' || autoplayParameter === 'audible'
+      ? autoplayParameter
+      : false;
+  const loadingParameter = parameters.get('loading');
+  const loading: Player.PlayerLoadingStrategy =
+    loadingParameter === 'eager' ||
+    loadingParameter === 'interaction' ||
+    loadingParameter === 'viewport'
+      ? loadingParameter
+      : 'viewport';
+  const preloadParameter = parameters.get('preload');
+  const preload: Player.PlayerPreload =
+    preloadParameter === 'none' ||
+    preloadParameter === 'metadata' ||
+    preloadParameter === 'auto'
+      ? preloadParameter
+      : 'metadata';
+  const defaultMuted = parameters.get('defaultMuted') === 'true';
   // See the "AirPlay demo control" note in apps/docs/src/main.tsx: gated so
   // the default fixture keeps a single page-global "Play" button.
-  const airplayDemo = airplay === 'demo';
-  const sourceChange = sourceChangeParameter === 'external';
+  const airplayDemo = parameters.get('airplay') === 'demo';
+  const sourceChange = parameters.get('sourceChange') === 'external';
+  const engineParameter = parameters.get('engine');
+  const hlsEngine: 'auto' | 'native' | 'hls.js' =
+    engineParameter === 'native' || engineParameter === 'hls.js'
+      ? engineParameter
+      : 'auto';
+  const sourceParameter = parameters.get('source');
 
   const vimeoSource: Player.RootProps['source'] | null =
     sourceParameter === 'vimeo'
@@ -248,9 +268,9 @@ const PlayerFixture = ({ args }: { readonly args: PlayerFixtureArgs }) => {
         : (vimeoSource ??
           (sourceChange
             ? 'https://provider.invalid/source-a.mp4'
-            : activationSourceParameter === 'external'
+            : parameters.get('activationSource') === 'external'
               ? 'https://provider.invalid/tracer.mp4'
-              : activationSourceParameter === 'youtube'
+              : parameters.get('activationSource') === 'youtube'
                 ? youtubeExampleUrl
                 : '/tracer.mp4'));
 
@@ -371,7 +391,7 @@ const meta: Meta<PlayerFixtureArgs> = {
     docs: {
       description: {
         component:
-          'Reproduces the `apps/docs` `PlayerFixture` e2e contract as a Storybook story: same testids, same `data-*` state attributes, same `window.reelyHandle`, and the same arg-driven source-selection branching (Storybook args replace the docs query string). Real providers, real media, real network — excluded from the deterministic story test suite (tagged `!test`).'
+          'Reproduces the `apps/docs` `PlayerFixture` e2e contract as a Storybook story: same testids, same `data-*` state attributes, same `window.reelyHandle`, and the same URL-query-driven source-selection branching (`?source=hls&engine=hls.js`, etc.) as the docs page. Real providers, real media, real network — excluded from the deterministic story test suite (tagged `!test`).'
       }
     }
   }
@@ -389,9 +409,9 @@ export const Default: Story = {
     preload: 'metadata',
     defaultMuted: false
   },
-  render: (args) => (
+  render: () => (
     <>
-      <PlayerFixture args={args} />
+      <PlayerFixture />
       <YouTubeExample />
     </>
   )

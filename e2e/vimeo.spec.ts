@@ -70,7 +70,7 @@ test('interaction loading contacts no Vimeo domain before one click plays', asyn
 }) => {
   const requests = await routeVimeo(page);
   await page.goto(
-    '/iframe.html?id=fixtures-playerfixture--default&viewMode=story&args=source:vimeo;loading:interaction'
+    '/iframe.html?id=fixtures-playerfixture--default&viewMode=story&source=vimeo&loading=interaction'
   );
   const activation = page.getByRole('button', { name: 'Play video' });
   await activation.waitFor();
@@ -100,7 +100,7 @@ test('viewport loading mounts the Vimeo embed without interaction', async ({
 }) => {
   await routeVimeo(page);
   await page.goto(
-    '/iframe.html?id=fixtures-playerfixture--default&viewMode=story&args=source:vimeo'
+    '/iframe.html?id=fixtures-playerfixture--default&viewMode=story&source=vimeo'
   );
   const iframe = page.locator('[data-reely-part="media"] iframe');
   await expect(iframe).toHaveAttribute(
@@ -115,7 +115,7 @@ test('viewport loading mounts the Vimeo embed without interaction', async ({
 test('unlisted embeds carry the privacy hash end to end', async ({ page }) => {
   const requests = await routeVimeo(page);
   await page.goto(
-    '/iframe.html?id=fixtures-playerfixture--default&viewMode=story&args=source:vimeo-unlisted;loading:interaction'
+    '/iframe.html?id=fixtures-playerfixture--default&viewMode=story&source=vimeo-unlisted&loading=interaction'
   );
   await page.getByRole('button', { name: 'Play video' }).click();
 
@@ -135,7 +135,7 @@ test('plan-gated chromeless controls report provider-plan', async ({
 }) => {
   await routeVimeo(page, 'basic');
   await page.goto(
-    '/iframe.html?id=fixtures-playerfixture--default&viewMode=story&args=source:vimeo;loading:interaction'
+    '/iframe.html?id=fixtures-playerfixture--default&viewMode=story&source=vimeo&loading=interaction'
   );
   await page.getByRole('button', { name: 'Play video' }).click();
   await expect(page.getByRole('button', { name: 'Pause' })).toBeVisible();
@@ -152,7 +152,7 @@ test('caption tracks discovered from the embed are selectable', async ({
 }) => {
   await routeVimeo(page);
   await page.goto(
-    '/iframe.html?id=fixtures-playerfixture--default&viewMode=story&args=source:vimeo;loading:interaction'
+    '/iframe.html?id=fixtures-playerfixture--default&viewMode=story&source=vimeo&loading=interaction'
   );
   await page.getByRole('button', { name: 'Play video' }).click();
   await expect(page.getByRole('button', { name: 'Pause' })).toBeVisible();

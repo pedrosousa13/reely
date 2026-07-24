@@ -2,7 +2,7 @@ import { expect, test } from '@playwright/test';
 
 test('muted autoplay reaches a confirmed started state', async ({ page }) => {
   await page.goto(
-    '/iframe.html?id=fixtures-playerfixture--default&viewMode=story&args=autoplay:muted'
+    '/iframe.html?id=fixtures-playerfixture--default&viewMode=story&autoplay=muted'
   );
 
   const button = page.locator('[data-autoplay-state]');
@@ -30,7 +30,7 @@ test('blocked audible autoplay waits for a user retry without muting', async ({
     };
   });
   await page.goto(
-    '/iframe.html?id=fixtures-playerfixture--default&viewMode=story&args=autoplay:audible'
+    '/iframe.html?id=fixtures-playerfixture--default&viewMode=story&autoplay=audible'
   );
 
   const playButton = page.getByRole('button', { name: 'Play' });
