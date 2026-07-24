@@ -1,0 +1,25 @@
+import { Meta } from '@storybook/addon-docs/blocks';
+
+<Meta title="Overview/Capabilities matrix" />
+
+# Capabilities matrix
+
+Capabilities come from the core `PlayerCapabilities` contract. Each control
+below reads one capability (or, for `Controls`, several) and appears only when
+that capability resolves `available`; while `unknown` or `unavailable` it
+renders nothing.
+
+| Component                 | Gating capability                                     | Renders when                          |
+| ------------------------- | ----------------------------------------------------- | ------------------------------------- |
+| `Player.PlayButton`       | — (provider presence)                                 | a provider is attached                |
+| `Player.MuteButton`       | `setVolume`                                           | `setVolume` is `available`            |
+| `Player.VolumeSlider`     | `setVolume`                                           | `setVolume` is `available`            |
+| `Player.SeekSlider`       | `seek`                                                | `seek` is `available`                 |
+| `Player.FullscreenButton` | `fullscreen`                                          | `fullscreen` is `available`           |
+| `Player.PipButton`        | `pictureInPicture`                                    | `pictureInPicture` is `available`     |
+| `Player.Time`             | — (display)                                           | always                                |
+| `Player.Controls`         | `seek`, `setVolume`, `fullscreen`, `pictureInPicture` | container; children gate individually |
+
+The remaining `PlayerCapabilities` keys — `setPlaybackRate`, `selectQuality`,
+`selectTextTrack`, `airPlay`, `customControls` — have no dedicated primitive
+yet; they are staged in stories but gate no shipped control.

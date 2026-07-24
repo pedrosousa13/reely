@@ -1,0 +1,22 @@
+import { Meta } from '@storybook/addon-docs/blocks';
+
+<Meta title="Overview/Contract" />
+
+# Data-attribute contract
+
+Every primitive exposes a stable styling/testing contract via data attributes.
+
+- **`data-reely-part`** — the primitive's stable name (`play-button`,
+  `mute-button`, `volume-slider`, `seek-slider` / `seek-buffered`,
+  `fullscreen-button`, `pip-button`, `time`, `controls`, `poster`,
+  `poster-image`, `loading-indicator`, `activation`, `viewport`, `media`).
+- **`data-state`** — the component's derived state (e.g. `paused`/`playing`,
+  `muted`/`unmuted`, `idle`/`ready`, `loading`/`loaded`/`error`,
+  `global`/`scoped`, or the activation state).
+- **`data-provider`** — present on capability-gated interactive controls,
+  carrying the active provider name.
+
+Style and query against these attributes rather than internal class names.
+
+Real playback (real providers, real media) is demonstrated in the docs app
+(`apps/docs`), driven by the e2e suite — not here.
