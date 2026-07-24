@@ -223,8 +223,8 @@ const PlayerFixture = ({
   const loading: Player.PlayerLoadingStrategy = loadingInput ?? 'viewport';
   const preload: Player.PlayerPreload = preloadInput ?? 'metadata';
   const defaultMuted = defaultMutedInput ?? false;
-  // See the "AirPlay demo control" note in apps/docs/src/main.tsx: gated so
-  // the default fixture keeps a single page-global "Play" button.
+  // AirPlay demo control is gated so the default fixture keeps a single
+  // page-global "Play" button.
   const airplayDemo = airplay === 'demo';
   const sourceChange = sourceChangeInput === 'external';
   const hlsEngine: 'auto' | 'native' | 'hls.js' = engine ?? 'auto';
@@ -369,7 +369,7 @@ const meta: Meta<PlayerFixtureProps> = {
     docs: {
       description: {
         component:
-          'Reproduces the `apps/docs` `PlayerFixture` e2e contract as one named Storybook story per scenario: same testids, same `data-*` state attributes, same `window.reelyHandle`, and the same source-selection branching as the docs page, driven by static story args instead of URL query parameters. Real providers, real media, real network — excluded from the deterministic story test suite (tagged `!test`).'
+          'Reproduces the original `PlayerFixture` e2e contract as one named Storybook story per scenario: same testids, same `data-*` state attributes, same `window.reelyHandle`, and the same source-selection branching, driven by static story args instead of URL query parameters. Real providers, real media, real network — excluded from the deterministic story test suite (tagged `!test`).'
       }
     }
   },

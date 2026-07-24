@@ -12,7 +12,7 @@ const tracerUrl = `${providerOrigin}/tracer.mp4`;
 const sourceAUrl = `${providerOrigin}/source-a.mp4`;
 const sourceBUrl = `${providerOrigin}/source-b.mp4`;
 const tracerBytes = readFile(
-  new URL('../apps/docs/public/tracer.mp4', import.meta.url)
+  new URL('../apps/storybook/public/tracer.mp4', import.meta.url)
 );
 
 type RecordedRequest = {
