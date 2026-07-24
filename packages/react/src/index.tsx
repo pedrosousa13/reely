@@ -12,7 +12,7 @@ import {
   type TimeRange
 } from '@reely/core';
 import type { NativePlaybackOptions } from '@reely/provider-native';
-import { SettingsIcon } from './icons.js';
+import { CheckIcon, SettingsIcon } from './icons.js';
 import {
   useActivation,
   type ActivationBindings,
@@ -1972,6 +1972,72 @@ export const MenuItem = ({
       tabIndex={-1}
       type="button"
     >
+      {children}
+    </button>
+  );
+};
+
+type MenuRadioContextValue = {
+  readonly value: string;
+  readonly onValueChange: (value: string) => void;
+};
+
+const MenuRadioContext = createContext<MenuRadioContextValue | null>(null);
+
+const useMenuRadio = (): MenuRadioContextValue => {
+  const ctx = useContext(MenuRadioContext);
+  if (!ctx) {
+    throw new Error('MenuRadioItem must be used within <MenuRadioGroup>');
+  }
+  return ctx;
+};
+
+export const MenuRadioGroup = ({
+  value,
+  onValueChange,
+  children,
+  ...props
+}: ComponentPropsWithRef<'div'> & {
+  readonly value: string;
+  readonly onValueChange: (value: string) => void;
+}) => (
+  <MenuRadioContext.Provider value={{ value, onValueChange }}>
+    <div {...props} data-reely-part="menu-radio-group" role="group">
+      {children}
+    </div>
+  </MenuRadioContext.Provider>
+);
+
+export const MenuRadioItem = ({
+  value,
+  children,
+  onClick,
+  style,
+  ...props
+}: ComponentPropsWithRef<'button'> & { readonly value: string }) => {
+  const { value: selected, onValueChange } = useMenuRadio();
+  const { close } = useSettingsMenu();
+  const checked = selected === value;
+  return (
+    <button
+      {...props}
+      aria-checked={checked}
+      data-reely-part="menu-radio-item"
+      data-state={checked ? 'checked' : 'unchecked'}
+      onClick={(event) => {
+        onClick?.(event);
+        if (event.defaultPrevented) return;
+        onValueChange(value);
+        close();
+      }}
+      role="menuitemradio"
+      style={{ ...controlTargetStyle, ...style }}
+      tabIndex={-1}
+      type="button"
+    >
+      <span aria-hidden data-reely-part="menu-radio-indicator">
+        {checked ? <CheckIcon /> : null}
+      </span>
       {children}
     </button>
   );

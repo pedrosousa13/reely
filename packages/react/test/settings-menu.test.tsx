@@ -114,3 +114,53 @@ describe('SettingsMenu', () => {
     expect(item.style.minHeight).toBe('44px');
   });
 });
+
+describe('MenuRadioGroup', () => {
+  const SpeedMenu = ({
+    value,
+    onValueChange
+  }: {
+    value: string;
+    onValueChange: (v: string) => void;
+  }) => (
+    <Player.SettingsMenu>
+      <Player.SettingsMenuTrigger />
+      <Player.SettingsMenuContent>
+        <Player.MenuRadioGroup value={value} onValueChange={onValueChange}>
+          <Player.MenuRadioItem value="0.5">0.5×</Player.MenuRadioItem>
+          <Player.MenuRadioItem value="1">1×</Player.MenuRadioItem>
+          <Player.MenuRadioItem value="2">2×</Player.MenuRadioItem>
+        </Player.MenuRadioGroup>
+      </Player.SettingsMenuContent>
+    </Player.SettingsMenu>
+  );
+
+  test('marks the selected item and exposes menuitemradio semantics', () => {
+    render(<SpeedMenu value="1" onValueChange={() => {}} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Settings' }));
+    const selected = screen.getByRole('menuitemradio', { name: '1×' });
+    expect(selected.getAttribute('aria-checked')).toBe('true');
+    expect(
+      screen.getByRole('menuitemradio', { name: '0.5×' }).getAttribute('aria-checked')
+    ).toBe('false');
+  });
+
+  test('selecting a radio item fires onValueChange with its value and closes', async () => {
+    let value = '1';
+    const onChange = (v: string) => (value = v);
+    const { rerender } = render(
+      <SpeedMenu value={value} onValueChange={onChange} />
+    );
+    const trigger = screen.getByRole('button', { name: 'Settings' });
+    fireEvent.click(trigger);
+    fireEvent.click(screen.getByRole('menuitemradio', { name: '2×' }));
+    expect(value).toBe('2');
+    expect(screen.queryByRole('menu')).toBeNull();
+    expect(hasFocus(trigger)).toBe(true);
+    rerender(<SpeedMenu value={value} onValueChange={onChange} />);
+    fireEvent.click(trigger);
+    expect(
+      screen.getByRole('menuitemradio', { name: '2×' }).getAttribute('aria-checked')
+    ).toBe('true');
+  });
+});
