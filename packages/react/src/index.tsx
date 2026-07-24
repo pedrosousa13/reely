@@ -1321,9 +1321,7 @@ export const SeekSlider = ({
   const min = window ? window.start : 0;
   const max = window ? window.end : 0;
   const span = max - min;
-  const value = window
-    ? Math.min(Math.max(currentTime, min), max)
-    : 0;
+  const value = window ? Math.min(Math.max(currentTime, min), max) : 0;
 
   return (
     <div

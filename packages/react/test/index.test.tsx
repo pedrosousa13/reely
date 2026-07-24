@@ -784,9 +784,7 @@ test('keeps confirmed paused state when the media play command rejects', async (
 
     expect(unhandledRejections).toEqual([]);
     expect(
-      screen
-        .getByRole('button', { name: 'Play' })
-        .getAttribute('data-state')
+      screen.getByRole('button', { name: 'Play' }).getAttribute('data-state')
     ).toBe('paused');
   } finally {
     process.off('unhandledRejection', onUnhandledRejection);
@@ -842,9 +840,7 @@ test('remounts media and resets confirmed playing state after a transition to HL
   expect(remounted).not.toBe(media);
   expect(remounted.querySelectorAll('source')).toHaveLength(0);
   expect(
-    screen
-      .getByRole('button', { name: 'Play' })
-      .getAttribute('data-state')
+    screen.getByRole('button', { name: 'Play' }).getAttribute('data-state')
   ).toBe('paused');
 });
 
@@ -884,9 +880,7 @@ test.each([
 
     expect(screen.queryByLabelText('Reely media')).toBeNull();
     expect(
-      screen
-        .getByRole('button', { name: 'Play' })
-        .getAttribute('data-state')
+      screen.getByRole('button', { name: 'Play' }).getAttribute('data-state')
     ).toBe('paused');
   }
 );
