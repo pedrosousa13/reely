@@ -2,6 +2,7 @@ import { fileURLToPath, URL } from 'node:url';
 import type { StorybookConfig } from '@storybook/react-vite';
 import remarkGfm from 'remark-gfm';
 import type { PluginOption } from 'vite';
+import { liveHlsFixture } from './live-playlist-plugin';
 
 /**
  * Serves `/__reely__/pending.png` by never responding, so a poster image can
@@ -26,6 +27,7 @@ const pendingAssetPlugin = (): PluginOption => {
 
 const config: StorybookConfig = {
   stories: ['../stories/**/*.mdx', '../stories/**/*.stories.tsx'],
+  staticDirs: ['../public'],
   addons: [
     '@storybook/addon-a11y',
     {
@@ -44,7 +46,11 @@ const config: StorybookConfig = {
   framework: '@storybook/react-vite',
   viteFinal: (viteConfig) => ({
     ...viteConfig,
-    plugins: [...(viteConfig.plugins ?? []), pendingAssetPlugin()],
+    plugins: [
+      ...(viteConfig.plugins ?? []),
+      pendingAssetPlugin(),
+      liveHlsFixture()
+    ],
     resolve: {
       ...viteConfig.resolve,
       alias: {

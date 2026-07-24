@@ -111,10 +111,13 @@ const MockPlayerRoot = ({
  * {@link MockPlayerParameters}); without it the player sits in its pristine
  * dormant state and interaction-driven activation works for `play` tests.
  */
-export const withMockPlayer: Decorator = (Story, context) => (
-  <MockPlayerRoot
-    parameters={(context.parameters.player ?? {}) as MockPlayerParameters}
-  >
-    <Story />
-  </MockPlayerRoot>
-);
+export const withMockPlayer: Decorator = (Story, context) => {
+  if (context.tags?.includes('real-playback')) return <Story />;
+  return (
+    <MockPlayerRoot
+      parameters={(context.parameters.player ?? {}) as MockPlayerParameters}
+    >
+      <Story />
+    </MockPlayerRoot>
+  );
+};

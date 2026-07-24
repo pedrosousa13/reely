@@ -20,7 +20,7 @@ const SEGMENT_DURATION_SECONDS = 1;
 const WINDOW_SEGMENTS = 20;
 
 const SEGMENT_PATH = fileURLToPath(
-  new URL('./public/hls/v0/seg_000.ts', import.meta.url)
+  new URL('../public/hls/v0/seg_000.ts', import.meta.url)
 );
 const SEGMENT_MATCH = /^\/live\/seg_(\d+)\.ts$/;
 

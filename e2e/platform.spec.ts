@@ -64,7 +64,10 @@ const environmentExpectation = (page: Page): Promise<PresentationExpectation> =>
 test('platform capability reporting matches what the browser supports', async ({
   page
 }) => {
-  await page.goto('/', { waitUntil: 'domcontentloaded' });
+  await page.goto(
+    '/iframe.html?id=fixtures-playerfixture--native-mp-4&viewMode=story',
+    { waitUntil: 'domcontentloaded' }
+  );
   await awaitCapabilityResolution(page);
 
   const expected = await environmentExpectation(page);
@@ -89,7 +92,10 @@ test('platform AirPlay capability is WebKit-only and gates the picker control', 
 }) => {
   // The AirPlay demo control is gated behind ?airplay=demo so it never adds a
   // second page-global "Play"-named button to the default fixture.
-  await page.goto('/?airplay=demo', { waitUntil: 'domcontentloaded' });
+  await page.goto(
+    '/iframe.html?id=fixtures-playerfixture--airplay-demo&viewMode=story',
+    { waitUntil: 'domcontentloaded' }
+  );
   await awaitCapabilityResolution(page);
 
   // AirPlay availability is API-support driven, so the reported capability must
@@ -119,7 +125,10 @@ test('platform capability gating shows presentation controls only when available
   browserName,
   page
 }) => {
-  await page.goto('/', { waitUntil: 'domcontentloaded' });
+  await page.goto(
+    '/iframe.html?id=fixtures-playerfixture--native-mp-4&viewMode=story',
+    { waitUntil: 'domcontentloaded' }
+  );
   await awaitCapabilityResolution(page);
 
   const fullscreenStatus = await capabilities(page).getAttribute(
@@ -156,7 +165,10 @@ test('platform fullscreen commands confirm state through fullscreenchange', asyn
     browserName !== 'chromium',
     'Programmatic fullscreen coverage is Chromium-only; Safari and iOS run in the manual device matrix.'
   );
-  await page.goto('/', { waitUntil: 'domcontentloaded' });
+  await page.goto(
+    '/iframe.html?id=fixtures-playerfixture--native-mp-4&viewMode=story',
+    { waitUntil: 'domcontentloaded' }
+  );
   await awaitCapabilityResolution(page);
 
   const toggle = page.getByTestId('fullscreen-toggle');

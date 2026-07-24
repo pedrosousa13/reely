@@ -66,7 +66,10 @@ test('keeps poster and viewport geometry stable before and after native activati
     await tracerRequestHeld;
     await route.continue();
   });
-  await page.goto('/', { waitUntil: 'domcontentloaded' });
+  await page.goto(
+    '/iframe.html?id=fixtures-playerfixture--native-mp-4&viewMode=story',
+    { waitUntil: 'domcontentloaded' }
+  );
   await heldTracerRequest;
 
   const beforeActivation = await rect(viewport(page));
@@ -86,7 +89,9 @@ test('preserves the documented focal position through landscape and portrait lay
   page
 }) => {
   await page.setViewportSize({ width: 1280, height: 720 });
-  await page.goto('/');
+  await page.goto(
+    '/iframe.html?id=fixtures-playerfixture--native-mp-4&viewMode=story'
+  );
 
   await expect(posterImage(page)).toHaveCSS('object-position', '30% 40%');
   await expectMatchingRectangles(page);
@@ -108,7 +113,9 @@ test('keeps poster geometry and focal position in Chromium fullscreen', async ({
     browserName !== 'chromium',
     'Task 3 fullscreen geometry coverage is Chromium-only.'
   );
-  await page.goto('/');
+  await page.goto(
+    '/iframe.html?id=fixtures-playerfixture--native-mp-4&viewMode=story'
+  );
 
   await viewport(page).evaluate((element) => {
     element.addEventListener('click', () => void element.requestFullscreen(), {
@@ -132,7 +139,9 @@ test('keeps poster geometry and focal position in Chromium fullscreen', async ({
 test('hides the poster after the first frame without changing its geometry', async ({
   page
 }) => {
-  await page.goto('/');
+  await page.goto(
+    '/iframe.html?id=fixtures-playerfixture--native-mp-4&viewMode=story'
+  );
   const visibleGeometry = await rect(poster(page));
 
   await page.getByRole('button', { name: 'Play' }).click();

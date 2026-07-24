@@ -1,6 +1,9 @@
 import { expect, test, type Page } from '@playwright/test';
 
-const hlsLibraryChunk = /\/assets\/hls-[^/]*\.js$/;
+// Under `storybook dev`, Vite's dependency optimizer serves hls.js from its
+// deps cache (e.g. /node_modules/.cache/storybook/<version>/<hash>/sb-vite/deps/hls__js.js),
+// not the production build's content-hashed /assets/hls-*.js chunk name.
+const hlsLibraryChunk = /\/deps\/hls__js\.js$/;
 
 const recordRequests = (page: Page): string[] => {
   const requests: string[] = [];
@@ -23,7 +26,9 @@ test('detects a live stream and adapts controls on the hls.js engine', async ({
   test.skip(browserName !== 'chromium', 'The hls.js flow runs on Chromium.');
 
   const requests = recordRequests(page);
-  await page.goto('/?source=live&engine=hls.js');
+  await page.goto(
+    '/iframe.html?id=fixtures-playerfixture--live-hls-js&viewMode=story'
+  );
 
   await expect(page.getByTestId('hls-engine')).toHaveText('hls.js');
 
@@ -50,7 +55,9 @@ test('surfaces a behind-edge seek within the live window on the hls.js engine', 
   // seek is meaningful, which takes longer than the default per-test budget.
   test.setTimeout(30_000);
 
-  await page.goto('/?source=live&engine=hls.js');
+  await page.goto(
+    '/iframe.html?id=fixtures-playerfixture--live-hls-js&viewMode=story'
+  );
   await expect(page.getByTestId('hls-engine')).toHaveText('hls.js');
 
   const panel = page.getByTestId('live-panel');
@@ -84,7 +91,9 @@ test('detects a live stream and never shows a fixed duration on native HLS', asy
   );
 
   const requests = recordRequests(page);
-  await page.goto('/?source=live&engine=native');
+  await page.goto(
+    '/iframe.html?id=fixtures-playerfixture--live-native&viewMode=story'
+  );
 
   await expect(page.getByTestId('hls-engine')).toHaveText('native');
   await page.getByRole('button', { name: 'Play' }).click();

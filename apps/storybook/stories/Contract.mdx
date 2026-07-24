@@ -19,5 +19,7 @@ Every primitive exposes a stable styling/testing contract via data attributes.
 
 Style and query against these attributes rather than internal class names.
 
-Real playback (real providers, real media) is demonstrated in the docs app
-(`apps/docs`), driven by the e2e suite — not here.
+Real playback (real providers, real media) is demonstrated in the
+`Real playback/Providers` stories, with the `Fixtures/PlayerFixture` stories
+driven by the e2e suite. Those stories hit the network and are excluded from
+the deterministic story test run (tagged `!test`).

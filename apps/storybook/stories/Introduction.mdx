@@ -7,7 +7,10 @@ import { Meta } from '@storybook/addon-docs/blocks';
 Headless player primitives staged in isolation. Every story renders under a
 mock `Player.Root` backed by an inert provider, so any `PlayerState` and
 capability set can be dialed in deterministically — with no media, network, or
-SDKs. Real playback lives in the docs app (`apps/docs`).
+SDKs. Real playback lives right here too, under the `Real playback/Providers`
+stories (native MP4, HLS, live, YouTube, Vimeo) and the `Fixtures/PlayerFixture`
+stories the e2e suite drives — those hit the network and are excluded from the
+deterministic test run (tagged `!test`).
 
 ## Story conventions
 

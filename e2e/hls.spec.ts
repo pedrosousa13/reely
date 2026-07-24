@@ -1,6 +1,9 @@
 import { expect, test, type Page } from '@playwright/test';
 
-const hlsLibraryChunk = /\/assets\/hls-[^/]*\.js$/;
+// Under `storybook dev`, Vite's dependency optimizer serves hls.js from its
+// deps cache (e.g. /node_modules/.cache/storybook/<version>/<hash>/sb-vite/deps/hls__js.js),
+// not the production build's content-hashed /assets/hls-*.js chunk name.
+const hlsLibraryChunk = /\/deps\/hls__js\.js$/;
 
 const recordRequests = (page: Page): string[] => {
   const requests: string[] = [];
@@ -30,7 +33,9 @@ test('plays the local hls fixture to completion with the hls.js engine', async (
   test.skip(browserName !== 'chromium', 'The hls.js flow runs on Chromium.');
 
   const requests = recordRequests(page);
-  await page.goto('/?source=hls&engine=hls.js');
+  await page.goto(
+    '/iframe.html?id=fixtures-playerfixture--hls-hls-js&viewMode=story'
+  );
 
   await expect(page.getByTestId('hls-engine')).toHaveText('hls.js');
   await playToCompletion(page);
@@ -49,7 +54,9 @@ test('plays the local hls fixture natively without downloading hls.js', async ({
   );
 
   const requests = recordRequests(page);
-  await page.goto('/?source=hls&engine=native');
+  await page.goto(
+    '/iframe.html?id=fixtures-playerfixture--hls-native&viewMode=story'
+  );
 
   await expect(page.getByTestId('hls-engine')).toHaveText('native');
   await playToCompletion(page);
@@ -67,7 +74,9 @@ test('surfaces a clear unsupported error for an impossible forced hls engine', a
     'Firefox deterministically lacks native HLS, making the forced native engine impossible.'
   );
 
-  await page.goto('/?source=hls&engine=native');
+  await page.goto(
+    '/iframe.html?id=fixtures-playerfixture--hls-native&viewMode=story'
+  );
 
   await expect(page.getByTestId('error-category')).toHaveText('unsupported');
   await expect(page.getByTestId('hls-engine')).toHaveText('none');

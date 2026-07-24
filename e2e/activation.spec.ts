@@ -12,7 +12,7 @@ const tracerUrl = `${providerOrigin}/tracer.mp4`;
 const sourceAUrl = `${providerOrigin}/source-a.mp4`;
 const sourceBUrl = `${providerOrigin}/source-b.mp4`;
 const tracerBytes = readFile(
-  new URL('../apps/docs/public/tracer.mp4', import.meta.url)
+  new URL('../apps/storybook/public/tracer.mp4', import.meta.url)
 );
 
 type RecordedRequest = {
@@ -134,7 +134,9 @@ test('interaction activation makes no provider request before click', async ({
 }) => {
   const providerRequests = await routeProviderMedia(page);
 
-  await page.goto('/?loading=interaction&activationSource=external');
+  await page.goto(
+    '/iframe.html?id=fixtures-playerfixture--interaction-external&viewMode=story'
+  );
   const activationButton = page.getByRole('button', { name: 'Play video' });
   await expect(activationButton).toBeVisible();
   await expect(page.getByTestId('viewport')).toBeVisible();
@@ -154,7 +156,7 @@ test('interaction source change stays dormant until a second click', async ({
   const providerRequests = await routeProviderMedia(page);
 
   await page.goto(
-    '/?loading=interaction&sourceChange=external&defaultMuted=true'
+    '/iframe.html?id=fixtures-playerfixture--interaction-source-change-muted&viewMode=story'
   );
   const activationButton = page.getByRole('button', { name: 'Play video' });
   await expect(activationButton).toBeVisible();
@@ -197,7 +199,7 @@ test('interaction preload=none plays from the activation click', async ({
   const providerRequests = await routeProviderMedia(page, playStarted);
 
   await page.goto(
-    '/?loading=interaction&preload=none&activationSource=external&defaultMuted=true'
+    '/iframe.html?id=fixtures-playerfixture--interaction-preload-none-external-muted&viewMode=story'
   );
   const activationButton = page.getByRole('button', { name: 'Play video' });
   const documentElement = page.locator('html');
